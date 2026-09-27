@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% from "_document.html" import document_article %}
+{% block title %}의견서 문구 · 주민의견서 관리자{% endblock %}
+{% block styles %}
+<link rel="stylesheet" href="{{ static_url('css/admin.css') }}">
+{% endblock %}
+{% block body_class %}admin{% endblock %}
+
+{% block body %}
+{% include "_admin_bar.html" %}
+
+<main class="admin-main">
+  <h1 class="page-title">의견서 문구</h1>
+  {% if flash %}
+  <p class="flash flash-{{ flash.kind }}" role="status">{{ flash.text }}</p>
+  {% endif %}
+  {% if message %}
+  <p class="flash flash-error" role="alert">{{ message }}</p>
+  {% endif %}
+
+  <section class="panel">
+    <h2 class="panel-title">현재 게시 중인 버전</h2>
+    <p class="current-meta">
+      <strong>{{ current.version }}</strong> · 게시 {{ current.created_at|kst }} · 이 버전으로 유효 제출 {{ current_valid }}건
+    </p>
+    <p class="panel-help">
+      주민 페이지에는 항상 이 버전이 보입니다. 아래에서 고쳐 게시하면 새 버전이 되고,
+      이미 제출된 의견서는 제출 당시 버전과 문구 그대로 보관됩니다.
+    </p>
+    <p><a class="text-link" href="/admin/document/versions/{{ current.version }}">{{ current.version }} 전체 문구 보기</a></p>
+  </section>
+
+  <section class="panel">
+    <h2 class="panel-title">문구 수정</h2>
+    <form class="doc-form" method="post" action="/admin/document/preview">
+      <input type="hidden" name="csrf" value="{{ csrf_token }}">
+      <input type="hidden" name="base_version" value="{{ base_version }}">
+
+      <div class="doc-field">
+        <label class="field-label" for="doc-title">제목</label>
+        <input class="input" id="doc-title" name="title" value="{{ form.title }}" maxlength="200" autocomplete="off">
+        {% if errors.title %}<p class="field-error">{{ errors.title }}</p>{% endif %}
+      </div>
+
+      <div class="doc-field">
+        <label class="field-label" for="doc-body">본문</label>
+        <p class="field-help">문단 사이는 빈 줄로 구분합니다. 굵게 보일 부분은 앞뒤를 <code>**</code>(별표 두 개)로 감쌉니다. 예: <code>**착공을 보류**</code></p>
+        <textarea class="input doc-textarea doc-body" id="doc-body" name="body" rows="18">{{ form.body }}</textarea>
+        {% if errors.body %}<p class="field-error">{{ errors.body }}</p>{% endif %}
+      </div>
+
+      <div class="doc-field">
+        <label class="field-label" for="doc-notes">하단 안내 <span class="optional">(선택)</span></label>
+        <p class="field-help">한 줄에 한 항목씩 적습니다. 주민 화면에는 ※ 표시와 함께 보입니다.</p>
+        <textarea class="input doc-textarea" id="doc-notes" name="notes" rows="4">{{ form.notes }}</textarea>
+        {% if errors.notes %}<p class="field-error">{{ errors.notes }}</p>{% endif %}
+      </div>
+
+      <div class="doc-field">
+        <label class="field-label" for="doc-recipient">제출처 <span class="optional">(선택)</span></label>
+        <input class="input" id="doc-recipient" name="recipient" value="{{ form.recipient }}" maxlength="300" autocomplete="off">
+        {% if errors.recipient %}<p class="field-error">{{ errors.recipient }}</p>{% endif %}
+      </div>
+
+      <div class="doc-actions">
+        <button class="btn btn-primary" type="submit">미리보기</button>
+        <a class="btn btn-ghost" href="/admin/document">수정 취소</a>
+      </div>
+    </form>
+  </section>
+
+  {% if preview %}
+  <section class="panel panel-preview" id="preview">
+    <h2 class="panel-title">미리보기 · 주민에게 이렇게 보입니다</h2>
+    <div class="preview-frame">
+      <p class="preview-title">{{ preview.title }}</p>
+      {{ document_article(preview) }}
+    </div>
+    <form class="publish-form" method="post" action="/admin/document/publish"
+          data-confirm="{{ next_version }}(으)로 게시할까요? 주민 페이지에 바로 반영됩니다.">
+      <input type="hidden" name="csrf" value="{{ csrf_token }}">
+      <input type="hidden" name="base_version" value="{{ base_version }}">
+      <input type="hidden" name="title" value="{{ form.title }}">
+      <textarea name="body" hidden>{{ form.body }}</textarea>
+      <textarea name="notes" hidden>{{ form.notes }}</textarea>
+      <input type="hidden" name="recipient" value="{{ form.recipient }}">
+      <p class="publish-warning">
+        게시하면 주민 페이지가 바로 <strong>{{ next_version }}</strong>(으)로 바뀝니다.
+        이미 제출된 의견서는 제출 당시 버전으로 보관되고, 게시 순간 작성 중이던 주민은 새로고침 후 다시 제출하게 됩니다.
+      </p>
+      <button class="btn btn-primary" type="submit">{{ next_version }}(으)로 게시하기</button>
+    </form>
+  </section>
+  {% endif %}
+
+  <section class="panel">
+    <h2 class="panel-title">버전 기록</h2>
+    <div class="table-wrap">
+      <table class="table table-cards">
+        <thead>
+          <tr><th scope="col">버전</th><th scope="col">게시일시</th><th scope="col">SHA-256</th><th scope="col">제출 (유효/전체)</th><th scope="col"><span class="sr-only">보기</span></th></tr>
+        </thead>
+        <tbody>
+        {%- for doc, valid_count, all_count in history %}
+          <tr>
+            <td data-label="버전"><strong>{{ doc.version }}</strong>{% if doc.is_active %} <span class="tag tag-agree">게시 중</span>{% endif %}</td>
+            <td class="nowrap" data-label="게시일시">{{ doc.created_at|kst }}</td>
+            <td data-label="SHA-256"><code>{{ doc.text_hash[:12] }}…</code></td>
+            <td data-label="제출">{{ valid_count }} / {{ all_count }}건</td>
+            <td class="actions" data-label="">
+              <a class="text-link" href="/admin/document/versions/{{ doc.version }}">전체 보기</a>
+              {%- if not doc.is_active %} · <a class="text-link" href="/admin/document?from={{ doc.version }}">이 문구로 다시 수정</a>{% endif %}
+            </td>
+          </tr>
+        {%- endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ static_url('js/admin.js') }}" defer></script>
+{% endblock %}

@@ -1,0 +1,18 @@
+{#- The opinion document as residents see it; also used for the admin preview and version pages. -#}
+{% macro document_article(doc) -%}
+<article class="document" aria-label="주민의견서 본문">
+  {%- for paragraph in doc.paragraphs %}
+  <p>{% for run, bold in paragraph %}{% if bold %}<strong>{{ run }}</strong>{% else %}{{ run }}{% endif %}{% endfor %}</p>
+  {%- endfor %}
+  {%- if doc.notes %}
+  <ul class="doc-notes">
+    {%- for note in doc.notes %}
+    <li>{{ note }}</li>
+    {%- endfor %}
+  </ul>
+  {%- endif %}
+  {%- if doc.recipient %}
+  <p class="doc-recipient">제출처 : {{ doc.recipient }}</p>
+  {%- endif %}
+</article>
+{%- endmacro %}

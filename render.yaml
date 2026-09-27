@@ -1,0 +1,40 @@
+# Render Blueprint: one web service + one PostgreSQL database in Singapore (the closest region to Korea).
+#
+# Both plans below are paid on purpose. On the free plans, Render deletes the Postgres database
+# (30 days after creation + a 14-day grace period, no backups) and a free web service sleeps after
+# 15 idle minutes and takes about a minute to wake up. Check current prices before applying.
+#
+# ADMIN_PASSWORD is not stored here: Render asks for it when the Blueprint is applied.
+services:
+  - type: web
+    name: ecoforet-opinion
+    runtime: python  # version pinned by .python-version (3.12)
+    region: singapore
+    plan: 0.5c-512mb
+    buildCommand: pip install -r requirements.txt
+    # --proxy-headers: the real client IP comes from Render's proxy. --no-access-log keeps admin search
+    # terms (resident names in URLs) out of the logs.
+    startCommand: 'uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips="*" --no-access-log'
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ecoforet-opinion-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ADMIN_PASSWORD
+        sync: false
+
+databases:
+  - name: ecoforet-opinion-db
+    databaseName: ecoforet_opinion
+    user: ecoforet_opinion
+    region: singapore
+    plan: 0.1c-256mb
+    # No connections from the internet; the web service reaches it over Render's private network.
+    # To inspect the data from a PC, add that PC's IP in the Render dashboard for the time needed.
+    ipAllowList: []

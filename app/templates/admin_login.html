@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}관리자 로그인 · 주민의견서{% endblock %}
+{% block styles %}
+<link rel="stylesheet" href="{{ static_url('css/admin.css') }}">
+{% endblock %}
+{% block body_class %}admin{% endblock %}
+
+{% block body %}
+<main class="login">
+  <h1 class="login-title">주민의견서 관리자</h1>
+  {% if message %}
+  <p class="alert" role="alert">{{ message }}</p>
+  {% elif not admin_enabled %}
+  <p class="alert" role="alert">관리자 비밀번호(ADMIN_PASSWORD 환경변수, 8자 이상)가 설정되지 않아 로그인할 수 없습니다.</p>
+  {% endif %}
+  <form class="login-form" method="post" action="/admin/login">
+    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+    <label class="field-label" for="password">관리자 비밀번호</label>
+    <input class="input" id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+    <button class="btn btn-primary btn-block" type="submit">로그인</button>
+  </form>
+</main>
+{% endblock %}

@@ -1,0 +1,12 @@
+{#- Top bar shared by the admin pages; `active` is "submissions" or "document". -#}
+<header class="admin-bar">
+  <p class="admin-brand">주민의견서 관리자</p>
+  <nav class="admin-nav" aria-label="관리자 메뉴">
+    <a href="/admin"{% if active == "submissions" %} aria-current="page"{% endif %}>제출 현황</a>
+    <a href="/admin/document"{% if active == "document" %} aria-current="page"{% endif %}>의견서 문구</a>
+  </nav>
+  <form class="admin-logout" method="post" action="/admin/logout">
+    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+    <button class="btn btn-ghost" type="submit">로그아웃</button>
+  </form>
+</header>

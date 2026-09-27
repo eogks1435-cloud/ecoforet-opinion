@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}제출 현황 · 주민의견서 관리자{% endblock %}
+{% block styles %}
+<link rel="stylesheet" href="{{ static_url('css/admin.css') }}">
+{% endblock %}
+{% block body_class %}admin{% endblock %}
+
+{% block body %}
+{% include "_admin_bar.html" %}
+
+<main class="admin-main">
+  <h1 class="page-title">제출 현황</h1>
+  {% if flash %}
+  <p class="flash flash-{{ flash.kind }}" role="status">{{ flash.text }}</p>
+  {% endif %}
+
+  <section class="stats" aria-label="집계">
+    <div class="stat"><p class="stat-label">전체 제출</p><p class="stat-value">총 {{ counts.total }}건</p></div>
+    <div class="stat"><p class="stat-label">의견서 내용 동의</p><p class="stat-value">{{ counts.agree }}건</p></div>
+    <div class="stat"><p class="stat-label">의견서 내용 동의하지 않음</p><p class="stat-value">{{ counts.disagree }}건</p></div>
+  </section>
+  <p class="stats-note">유효(ACTIVE) 제출만 집계합니다. 무효 처리된 {{ counts.invalidated }}건은 집계에서 제외됩니다.</p>
+
+  <form class="filters" method="get" action="/admin">
+    <label class="filter"><span>동</span><input class="input" name="building" value="{{ filters.building }}" inputmode="numeric" maxlength="10" autocomplete="off"></label>
+    <label class="filter"><span>호수</span><input class="input" name="unit" value="{{ filters.unit }}" inputmode="numeric" maxlength="10" autocomplete="off"></label>
+    <label class="filter filter-wide"><span>성명</span><input class="input" name="name" value="{{ filters.name }}" maxlength="30" autocomplete="off"></label>
+    <label class="filter"><span>의견</span>
+      <select class="input" name="opinion">
+        <option value="">전체</option>
+        <option value="AGREE"{% if filters.opinion == "AGREE" %} selected{% endif %}>동의</option>
+        <option value="DISAGREE"{% if filters.opinion == "DISAGREE" %} selected{% endif %}>동의하지 않음</option>
+      </select>
+    </label>
+    <label class="filter"><span>상태</span>
+      <select class="input" name="status">
+        <option value="">전체</option>
+        <option value="ACTIVE"{% if filters.status == "ACTIVE" %} selected{% endif %}>유효</option>
+        <option value="INVALIDATED"{% if filters.status == "INVALIDATED" %} selected{% endif %}>무효</option>
+      </select>
+    </label>
+    <div class="filter-actions">
+      <button class="btn btn-primary" type="submit">검색</button>
+      <a class="btn btn-ghost" href="/admin">초기화</a>
+    </div>
+  </form>
+
+  <div class="list-bar">
+    <p class="list-count">{{ items|length }}건 표시 · 최신순</p>
+    <a class="btn btn-secondary" href="{{ export_url }}">CSV 다운로드</a>
+  </div>
+
+  <div class="table-wrap">
+    <table class="table table-cards">
+      <thead>
+        <tr>
+          <th scope="col">제출시간</th><th scope="col">동</th><th scope="col">호수</th><th scope="col">성명</th>
+          <th scope="col">의견</th><th scope="col">서명</th><th scope="col">기타의견</th><th scope="col">상태</th>
+          <th scope="col"><span class="sr-only">관리</span></th>
+        </tr>
+      </thead>
+      <tbody>
+      {%- for row, detail in items %}
+        <tr{% if row.status == "INVALIDATED" %} class="is-invalid"{% endif %}>
+          <td class="nowrap" data-label="제출시간">{{ row.submitted_at|kst }}</td>
+          <td data-label="동">{{ row.building }}</td>
+          <td data-label="호수">{{ row.unit }}</td>
+          <td class="nowrap" data-label="성명">{{ row.resident_name }}</td>
+          <td data-label="의견"><span class="tag tag-{{ row.opinion_choice|lower }}">{{ opinion_labels[row.opinion_choice] }}</span></td>
+          <td data-label="서명">
+            <button class="sig-thumb" type="button" data-detail='{{ detail|tojson }}' aria-label="{{ row.building }}동 {{ row.unit }}호 서명 크게 보기">
+              <img src="/admin/signatures/{{ row.public_id }}.png" alt="" width="120" height="60" loading="lazy">
+            </button>
+          </td>
+          <td class="comment" data-label="기타의견">{% if row.additional_comment %}{{ row.additional_comment|truncate(60, true, "…") }}{% endif %}</td>
+          <td data-label="상태"><span class="status status-{{ row.status|lower }}">{{ status_labels[row.status] }}</span></td>
+          <td class="actions" data-label="">
+            {%- if row.status == "ACTIVE" %}
+            <button class="btn btn-danger-ghost" type="button" data-invalidate="{{ row.public_id }}" data-target="{{ row.building }}동 {{ row.unit }}호 · {{ row.resident_name }}">무효 처리</button>
+            {%- endif %}
+          </td>
+        </tr>
+      {%- else %}
+        <tr><td class="empty" colspan="9">{% if filters.query_string() %}검색 조건에 맞는 제출이 없습니다.{% else %}아직 제출된 의견서가 없습니다.{% endif %}</td></tr>
+      {%- endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if current_document %}
+  <p class="doc-meta">주민 페이지에 게시 중인 의견서: <a class="text-link" href="/admin/document">{{ current_document.version }}</a> · 본문 SHA-256 <code>{{ current_document.text_hash }}</code></p>
+  {% endif %}
+</main>
+
+<div class="modal" id="detail-modal" hidden>
+  <div class="modal-backdrop" data-modal-close></div>
+  <div class="modal-panel modal-wide" role="dialog" aria-modal="true" aria-labelledby="detail-title" tabindex="-1">
+    <h2 class="modal-title" id="detail-title"></h2>
+    <div class="detail-sig"><img id="detail-signature" alt="서명 확대 이미지"></div>
+    <dl class="detail-list">
+      <div><dt>의견</dt><dd id="detail-opinion"></dd></div>
+      <div><dt>제출일시</dt><dd id="detail-submitted"></dd></div>
+      <div><dt>제출번호</dt><dd id="detail-number"></dd></div>
+      <div><dt>상태</dt><dd id="detail-status"></dd></div>
+      <div id="detail-reason-row"><dt>무효 사유</dt><dd id="detail-reason"></dd></div>
+      <div><dt>의견서 버전</dt><dd><a class="text-link" id="detail-version" href="/admin/document"></a></dd></div>
+      <div><dt>기타 의견</dt><dd class="pre" id="detail-comment"></dd></div>
+    </dl>
+    <details class="access" id="detail-access">
+      <summary>접속 정보 보기 (IP·브라우저)</summary>
+      <dl class="detail-list">
+        <div><dt>IP</dt><dd id="detail-ip"></dd></div>
+        <div><dt>브라우저</dt><dd class="break" id="detail-ua"></dd></div>
+      </dl>
+    </details>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" type="button" data-modal-close>닫기</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="invalidate-modal" hidden>
+  <div class="modal-backdrop" data-modal-close></div>
+  <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="invalidate-title" tabindex="-1">
+    <h2 class="modal-title" id="invalidate-title">이 제출 건을 무효 처리하시겠습니까?</h2>
+    <p class="modal-target" id="invalidate-target"></p>
+    <p class="modal-text">무효 처리한 제출은 집계에서 빠지고, 같은 동·호수로 다시 제출할 수 있게 됩니다. 기록은 삭제되지 않고 목록에 남습니다.</p>
+    <form method="post" id="invalidate-form" action="/admin">
+      <input type="hidden" name="csrf" value="{{ csrf_token }}">
+      <input type="hidden" name="back" value="{{ current_url }}">
+      <label class="field-label" for="invalidate-reason">사유 (선택)</label>
+      <input class="input" id="invalidate-reason" name="reason" maxlength="200" placeholder="예: 본인 요청으로 재제출" autocomplete="off">
+      <div class="modal-actions">
+        <button class="btn btn-secondary" type="button" data-modal-close>취소</button>
+        <button class="btn btn-danger" type="submit">무효 처리</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ static_url('js/modal.js') }}" defer></script>
+<script src="{{ static_url('js/admin.js') }}" defer></script>
+{% endblock %}

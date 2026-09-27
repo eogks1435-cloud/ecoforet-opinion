@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light">
+<meta name="format-detection" content="telephone=no">
+<title>{% block title %}{{ doc_title }}{% endblock %}</title>
+{%- block meta %}{% endblock %}
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="{{ static_url('css/app.css') }}">
+{%- block styles %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}">
+{% block body %}{% endblock %}
+{%- block scripts %}{% endblock %}
+</body>
+</html>
