@@ -44,10 +44,12 @@ async def security_headers(request: Request, call_next):
     response = await call_next(request)
     headers = response.headers
     headers.setdefault("X-Content-Type-Options", "nosniff")
-    headers.setdefault("X-Frame-Options", "DENY")
     headers.setdefault("Referrer-Policy", "same-origin")
     headers.setdefault("Permissions-Policy", "geolocation=(), camera=(), microphone=(), payment=()")
-    headers.setdefault("Content-Security-Policy", CONTENT_SECURITY_POLICY)
+    if not headers.get("content-type", "").startswith("application/pdf"):
+        # Not on PDFs: the browser's built-in PDF viewer can be blocked by these.
+        headers.setdefault("X-Frame-Options", "DENY")
+        headers.setdefault("Content-Security-Policy", CONTENT_SECURITY_POLICY)
     headers.setdefault("X-Robots-Tag", "noindex, nofollow")
     if settings.is_production:
         headers.setdefault("Strict-Transport-Security", "max-age=31536000")

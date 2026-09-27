@@ -93,6 +93,8 @@
   white-space: nowrap;
 }
 
+.btn-row { min-height: 36px; margin: 2px 6px 2px 0; padding: 4px 10px; font-size: 14px; white-space: nowrap; }
+
 .doc-meta { margin-top: 18px; font-size: 13px; color: var(--muted); word-break: break-all; }
 
 /* Detail and invalidation dialogs */

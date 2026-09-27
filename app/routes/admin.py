@@ -20,7 +20,15 @@ from sqlalchemy.orm import Session
 from .. import document
 from ..config import settings
 from ..database import get_db
-from ..models import OPINION_AGREE, OPINION_DISAGREE, STATUS_ACTIVE, STATUS_INVALIDATED, OpinionSubmission
+from ..models import (
+    OPINION_AGREE,
+    OPINION_DISAGREE,
+    STATUS_ACTIVE,
+    STATUS_INVALIDATED,
+    OpinionDocument,
+    OpinionSubmission,
+)
+from ..pdf import build_submission_pdf
 from ..schemas import REASON_MAX, clean_text, parse_number
 from ..security import (
     client_ip,
@@ -210,6 +218,22 @@ def signature_image(public_id: uuid.UUID, request: Request, db: Session = Depend
     if data is None:
         return Response(status_code=404)
     return Response(content=bytes(data), media_type="image/png", headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/submissions/{public_id}/pdf")
+def submission_pdf(public_id: uuid.UUID, request: Request, db: Session = Depends(get_db)) -> Response:
+    if not is_admin(request):
+        return to_login()
+    row = db.scalar(select(OpinionSubmission).where(OpinionSubmission.public_id == public_id))
+    if row is None:
+        return Response(status_code=404)
+    doc = db.scalar(select(OpinionDocument).where(OpinionDocument.version == row.document_version))
+    filename = f"opinion_{row.building}-{row.unit}_{row.receipt_no}.pdf"
+    return Response(
+        build_submission_pdf(row, doc),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 @router.post("/submissions/{public_id}/invalidate")

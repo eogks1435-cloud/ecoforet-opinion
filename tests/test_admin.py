@@ -139,6 +139,24 @@ def test_invalidation_excludes_the_row_and_frees_the_unit(admin, submit, db):
     assert "이미 무효 처리된 제출입니다." in admin.get("/admin").text
 
 
+def test_submission_pdf(admin, client, submit, db):
+    submit(additional_comment="PDF 확인용 의견")
+    row = db.scalars(select(OpinionSubmission)).one()
+    url = f"/admin/submissions/{row.public_id}/pdf"
+    assert url in admin.get("/admin").text  # button on the row
+    response = admin.get(url)
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content.startswith(b"%PDF")
+    assert f"opinion_101-1203_{row.receipt_no}.pdf" in response.headers["content-disposition"]
+    assert "content-security-policy" not in response.headers
+    assert admin.get(f"/admin/submissions/{row.public_id.hex[:8]}0000-0000-0000-0000-000000000000/pdf").status_code == 422
+    assert _invalidate(admin, row, reason="테스트").status_code == 303
+    assert admin.get(url).status_code == 200  # invalidated rows still print (marked 무효)
+    admin.cookies.clear()
+    assert admin.get(url, follow_redirects=False).status_code == 303
+
+
 def test_csv_export(admin, submit):
     submit(building="101", unit="1203", resident_name="홍길동", additional_comment="=HYPERLINK(\"http://x\")")
     submit(building="102", unit="7", resident_name="김영희", opinion_choice="DISAGREE")

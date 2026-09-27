@@ -75,6 +75,7 @@
           <td class="comment" data-label="기타의견">{% if row.additional_comment %}{{ row.additional_comment|truncate(60, true, "…") }}{% endif %}</td>
           <td data-label="상태"><span class="status status-{{ row.status|lower }}">{{ status_labels[row.status] }}</span></td>
           <td class="actions" data-label="">
+            <a class="btn btn-secondary btn-row" href="/admin/submissions/{{ row.public_id }}/pdf" target="_blank" rel="noopener">PDF 보기</a>
             {%- if row.status == "ACTIVE" %}
             <button class="btn btn-danger-ghost" type="button" data-invalidate="{{ row.public_id }}" data-target="{{ row.building }}동 {{ row.unit }}호 · {{ row.resident_name }}">무효 처리</button>
             {%- endif %}
