@@ -61,7 +61,7 @@
 .list-bar .btn { min-height: 44px; font-size: 16px; }
 
 /* Tables */
-.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.table-wrap { position: relative; overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
 .table { width: 100%; border-collapse: collapse; font-size: 15px; line-height: 1.5; word-break: normal; }
 .table th, .table td { padding: 10px 12px; border-bottom: 1px solid #e6e8eb; text-align: left; vertical-align: middle; }
 .table th { background: #f7f8fa; font-weight: 600; color: #444a52; white-space: nowrap; }
@@ -193,7 +193,9 @@ code { padding: 0 3px; border-radius: 4px; background: #f1f3f5; font-size: 0.92e
     color: var(--muted);
   }
   .table-cards td:not([data-label])::before, .table-cards td[data-label=""]::before { content: none; }
-  .table-cards .comment { min-width: 0; max-width: none; }
+  .table-cards .comment { min-width: 0; max-width: none; word-break: break-all; }
+  .table-cards td { overflow-wrap: anywhere; }
+  .table-cards .nowrap { white-space: normal; }
   .table-cards .actions { padding-top: 6px; }
   .table-cards .empty { display: block; }
 

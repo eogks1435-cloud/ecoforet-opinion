@@ -215,6 +215,14 @@ def publish_document(db: Session, data: DocumentInput, base_version: str, ip_add
     """Make `data` the new active version. `base_version` is the version the editor started from."""
     current = db.scalar(select(OpinionDocument).where(OpinionDocument.is_active.is_(True)).with_for_update())
     if current is None:
+        # Another admin published while this one waited for the row lock: a fresh read sees the new version.
+        live = active_document(db)
+        if live is not None:
+            raise PublishError(
+                "conflict",
+                f"수정하는 동안 {live.version} 버전이 먼저 게시되었습니다. "
+                "위의 현재 게시본을 확인한 뒤 다시 미리보기하고 게시해 주세요.",
+            )
         raise PublishError("missing", "게시 중인 의견서를 찾지 못했습니다.")
     if current.version != base_version:
         raise PublishError(

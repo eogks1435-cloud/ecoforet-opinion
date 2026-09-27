@@ -66,21 +66,31 @@ def csrf_valid(request: Request, submitted: str | None) -> bool:
     expected = request.session.get(CSRF_SESSION_KEY)
     if not expected or not submitted:
         return False
-    return hmac.compare_digest(str(expected), submitted) and same_origin(request)
+    return hmac.compare_digest(str(expected).encode(), submitted.encode()) and same_origin(request)
 
 
 def client_ip(request: Request) -> str | None:
-    """Client address for the record (not an identity check).
+    """Client address for the record and the login throttle (not an identity check).
 
-    Render puts the real client IP first in X-Forwarded-For; without a proxy header the socket peer is used.
+    Render sits behind Cloudflare, which sets CF-Connecting-IP itself, so a client cannot fake it. The first
+    X-Forwarded-For entry is the fallback (a client can prepend to that header); then the socket peer.
     """
-    forwarded = request.headers.get("x-forwarded-for", "")
-    candidate = forwarded.split(",")[0].strip() if forwarded else ""
-    try:
-        return str(ipaddress.ip_address(candidate))
-    except ValueError:
-        pass
+    for header in ("cf-connecting-ip", "x-forwarded-for"):
+        candidate = request.headers.get(header, "").split(",")[0].strip()
+        try:
+            return str(ipaddress.ip_address(candidate))
+        except ValueError:
+            continue
     return request.client.host[:64] if request.client else None
+
+
+def throttle_key(ip: str) -> str:
+    """IPv6 clients usually own a whole /64, so failures are counted per /64 there."""
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError:
+        return ip
+    return str(ipaddress.ip_network(f"{address}/64", strict=False)) if address.version == 6 else str(address)
 
 
 class LoginThrottle:

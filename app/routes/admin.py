@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass
@@ -38,6 +39,7 @@ from ..security import (
     login_throttle,
     password_matches,
     start_admin_session,
+    throttle_key,
 )
 from ..templating import format_kst, templates, to_kst
 
@@ -48,6 +50,7 @@ STATUS_LABEL = {STATUS_ACTIVE: "유효", STATUS_INVALIDATED: "무효"}
 EXPORT_HEADER = ["번호", "동", "호수", "성명", "의견", "기타 의견", "제출일시", "의견서 버전", "상태", "제출번호"]
 FLASH_KEY = "flash"
 FAILED_LOGIN_DELAY = 0.5  # seconds; slows down password guessing
+_pdf_slots = threading.BoundedSemaphore(2)  # each PDF build holds ~15 MB; the instance has 512 MB
 
 
 @dataclass(frozen=True)
@@ -156,14 +159,14 @@ def login(request: Request, password: str = Form(""), csrf: str = Form("")):
     if not csrf_valid(request, csrf):
         return _login_page(request, "보안 확인 시간이 지났습니다. 다시 로그인해 주세요.", 400)
     ip = client_ip(request) or "unknown"
-    if login_throttle.blocked(ip):
+    if login_throttle.blocked(throttle_key(ip)):
         return _login_page(request, "로그인 시도가 너무 많습니다. 15분 후 다시 시도해 주세요.", 429)
     if not password_matches(password):
-        login_throttle.record_failure(ip)
+        login_throttle.record_failure(throttle_key(ip))
         time.sleep(FAILED_LOGIN_DELAY)
         logger.warning("admin login failed ip=%s", ip)
         return _login_page(request, "비밀번호가 올바르지 않습니다.", 401)
-    login_throttle.reset(ip)
+    login_throttle.reset(throttle_key(ip))
     start_admin_session(request)
     logger.info("admin login ip=%s", ip)
     return RedirectResponse("/admin", status_code=303)
@@ -224,15 +227,20 @@ def signature_image(public_id: uuid.UUID, request: Request, db: Session = Depend
 def submission_pdf(public_id: uuid.UUID, request: Request, db: Session = Depends(get_db)) -> Response:
     if not is_admin(request):
         return to_login()
-    row = db.scalar(select(OpinionSubmission).where(OpinionSubmission.public_id == public_id))
-    if row is None:
-        return Response(status_code=404)
-    doc = db.scalar(select(OpinionDocument).where(OpinionDocument.version == row.document_version))
+    # Wait for a slot before touching the DB, so waiting requests hold no pooled connection.
+    if not _pdf_slots.acquire(timeout=20):
+        return Response("PDF 요청이 많습니다. 잠시 후 다시 열어 주세요.", status_code=503, media_type="text/plain; charset=utf-8")
+    try:
+        row = db.scalar(select(OpinionSubmission).where(OpinionSubmission.public_id == public_id))
+        if row is None:
+            return Response(status_code=404)
+        doc = db.scalar(select(OpinionDocument).where(OpinionDocument.version == row.document_version))
+        content = build_submission_pdf(row, doc)
+    finally:
+        _pdf_slots.release()
     filename = f"opinion_{row.building}-{row.unit}_{row.receipt_no}.pdf"
     return Response(
-        build_submission_pdf(row, doc),
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+        content, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{filename}"'}
     )
 
 
@@ -311,7 +319,7 @@ def export_csv(
                 format_kst(row.submitted_at, "%Y-%m-%d %H:%M:%S"),
                 row.document_version,
                 STATUS_LABEL[row.status],
-                row.receipt_no,
+                f'="{row.receipt_no}"',  # Excel would turn e.g. 00123456 or 1234E567 into a number
             ]
         )
     stamp = to_kst(datetime.now(timezone.utc)).strftime("%Y%m%d_%H%M")

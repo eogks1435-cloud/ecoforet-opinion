@@ -170,6 +170,8 @@ legend.section-title + * { clear: both; }
   user-select: none;
   -webkit-touch-callout: none;
 }
+.sig-line, .sig-hint { z-index: 1; pointer-events: none; } /* above the white canvas, clicks pass through */
+.sig-line { mix-blend-mode: multiply; } /* the dashes vanish under ink instead of cutting strokes */
 .sig-line { position: absolute; left: 7%; right: 7%; bottom: 24%; border-bottom: 1px dashed #c3c8ce; }
 .sig-hint {
   position: absolute;

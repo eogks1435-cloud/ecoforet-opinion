@@ -17,9 +17,10 @@ class Base(DeclarativeBase):
 
 def _make_engine(url: str) -> Engine:
     if url.startswith("sqlite"):  # tests without PostgreSQL only
-        return create_engine(url, connect_args={"check_same_thread": False})
+        return create_engine(url, connect_args={"check_same_thread": False}, hide_parameters=True)
     return create_engine(
         url,
+        hide_parameters=True,  # DB errors must not copy resident names/comments into the logs
         # One shared pool per process: 5 kept open, up to 10 more under bursts, never one per request.
         pool_size=settings.db_pool_size,
         max_overflow=settings.db_max_overflow,

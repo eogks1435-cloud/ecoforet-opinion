@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import re
@@ -173,6 +174,26 @@ def test_field_rules(submit, db):
         response = submit(**overrides)
         assert response.status_code == 422, overrides
         assert key in response.json()["errors"], overrides
+    assert _count(db) == 0
+
+
+def test_client_ip_prefers_cloudflare_header(submit, db):
+    headers = dict(FETCH_HEADERS, **{"CF-Connecting-IP": "198.51.100.9", "X-Forwarded-For": "1.2.3.4, 198.51.100.9"})
+    assert submit(headers=headers).status_code == 201
+    assert db.scalars(select(OpinionSubmission)).one().ip_address == "198.51.100.9"
+
+
+def test_png_with_oversized_text_chunk_is_a_form_error(submit, db):
+    from PIL import PngImagePlugin
+
+    info = PngImagePlugin.PngInfo()
+    info.add_text("junk", "0" * 3_000_000, zip=True)  # Pillow refuses to inflate it (ValueError)
+    image = Image.new("L", (600, 300), 255)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG", pnginfo=info)
+    data_url = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode()
+    response = submit(signature=data_url)
+    assert response.status_code == 422 and "signature" in response.json()["errors"]
     assert _count(db) == 0
 
 

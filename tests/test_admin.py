@@ -157,6 +157,36 @@ def test_submission_pdf(admin, client, submit, db):
     assert admin.get(url, follow_redirects=False).status_code == 303
 
 
+def test_pdf_never_drops_characters_silently(admin, submit, db, caplog):
+    from app.pdf import _Printable
+
+    printable = _Printable()
+    assert printable("ㅋㅋ ㅠㅠ 홍길동") == "ㅋㅋ ㅠㅠ 홍길동"  # Hangul jamo stay as typed
+    assert printable("30㎡ ① ㈜시공 José\t끝") == "30m2 1 (주)시공 Jose 끝"
+    assert printable("洪吉童 👍") == "□□□ □" and printable.replaced
+    clean = _Printable()
+    assert clean("홍​길동﻿ 동∙호수 1️⃣") == "홍길동 동·호수 1" and not clean.replaced  # invisible chars dropped
+    assert _Printable()("❤️👍🏻") == "□□"
+
+    submit(resident_name="洪길동", additional_comment="① 면적 120㎡ ㈜시공사 확인 👍")
+    row = db.scalars(select(OpinionSubmission)).one()
+    with caplog.at_level("WARNING", logger="fpdf"):
+        response = admin.get(f"/admin/submissions/{row.public_id}/pdf")
+    assert response.status_code == 200 and response.content.startswith(b"%PDF")
+    assert not [r for r in caplog.records if "missing" in r.getMessage()]
+
+
+def test_login_throttle_counts_ipv6_per_64():
+    assert security.throttle_key("2001:db8::2") == security.throttle_key("2001:db8::ffff") == "2001:db8::/64"
+    assert security.throttle_key("203.0.113.7") == "203.0.113.7"
+
+
+def test_admin_post_with_non_ascii_csrf_is_rejected(client):
+    client.get("/admin/login")
+    response = client.post("/admin/login", data={"password": "x", "csrf": "가나다"}, headers={"Origin": ORIGIN})
+    assert response.status_code == 400
+
+
 def test_csv_export(admin, submit):
     submit(building="101", unit="1203", resident_name="홍길동", additional_comment="=HYPERLINK(\"http://x\")")
     submit(building="102", unit="7", resident_name="김영희", opinion_choice="DISAGREE")
@@ -174,7 +204,7 @@ def test_csv_export(admin, submit):
     assert first[5] == "'=HYPERLINK(\"http://x\")"  # formula neutralised
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", first[6])
     assert first[7:9] == ["EPOXY_OPINION_V1", "유효"]
-    assert re.fullmatch(r"[0-9A-F]{8}", first[9])
+    assert re.fullmatch(r'="[0-9A-F]{8}"', first[9])  # kept as text when Excel opens the file
     assert second[4] == "의견서 내용에 동의하지 않음"
 
     filtered = admin.get("/admin/export.csv?opinion=DISAGREE").content.decode("utf-8-sig")

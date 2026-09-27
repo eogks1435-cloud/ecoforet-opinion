@@ -93,7 +93,8 @@ def process_signature(data_url: str) -> bytes:
             if img.format != "PNG" or not (50 <= width <= SIGNATURE_MAX_SIDE and 25 <= height <= SIGNATURE_MAX_SIDE):
                 raise unreadable
             rgba = img.convert("RGBA")
-    except (UnidentifiedImageError, OSError, Image.DecompressionBombError):
+    # ValueError: oversized text chunks; SyntaxError: Pillow's "broken PNG file"
+    except (UnidentifiedImageError, OSError, ValueError, SyntaxError, Image.DecompressionBombError):
         raise unreadable from None
 
     flattened = Image.new("RGBA", rgba.size, (255, 255, 255, 255))  # transparent areas become white paper

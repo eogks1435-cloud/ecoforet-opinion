@@ -73,7 +73,9 @@
 
   SignaturePad.prototype.redraw = function () {
     this.frame = 0;
-    this.ctx.clearRect(0, 0, this.width, this.height);
+    // Paint the paper white: with a transparent canvas, forced dark modes (Samsung Internet) turn the pad black.
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.fillRect(0, 0, this.width, this.height);
     drawStrokes(this.ctx, this.strokes, this.width, this.height);
   };
 
@@ -351,8 +353,8 @@
     input.addEventListener('input', function () {
       var cleaned = input.value
         .replace(/[０-９]/g, function (ch) { return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0); })
-        .replace(/[^0-9]/g, '')
-        .slice(0, 4);
+        .match(/[0-9]+/); // first number only: a pasted '101동 1203호' must not become '1011'
+      cleaned = cleaned ? cleaned[0].slice(0, 4) : '';
       if (cleaned !== input.value) input.value = cleaned;
       setError('residence', '');
     });
@@ -389,11 +391,16 @@
   var submitting = false;
   var signatureDataUrl = '';
   var mustReload = false; // the document changed while the resident was writing
+  var reloadMessage = '';
+  var unknownResidence = ''; // 동-호 of an attempt that got no clear answer, so it may have been stored
+  var SUBMIT_TIMEOUT = 90000; // a sleeping free instance can take about a minute to wake up
+  var MAYBE_STORED = '조금 전 제출이 이미 접수되었을 수 있습니다. 같은 동·호수로 접수된 의견서가 있어 다시 제출되지 않았습니다. ' +
+    '접수 여부는 관리사무소에 문의해 주세요.';
 
   function setBusy(busy) {
     confirmSubmit.disabled = busy;
     confirmCancel.disabled = busy;
-    confirmSubmit.textContent = busy ? '제출 중…' : '최종 제출';
+    confirmSubmit.textContent = busy ? '제출 중…' : (mustReload ? '새로고침' : '최종 제출');
     if (busy) confirmModal.setAttribute('data-locked', 'true');
     else confirmModal.removeAttribute('data-locked');
   }
@@ -415,28 +422,34 @@
     byId('summary-opinion').textContent = '의견: ' + choice.getAttribute('data-summary');
     signatureDataUrl = pad.toDataURL();
     byId('summary-signature').src = signatureDataUrl;
-    hideAlert(confirmAlert);
+    if (mustReload) showAlert(confirmAlert, reloadMessage);
+    else hideAlert(confirmAlert);
+    setBusy(false);
     window.Modal.open(confirmModal);
   });
 
   function fail(status, data) {
     submitting = false;
-    setBusy(false);
     var message = data.message || TEMP_FAILURE;
     if (data.code === 'document_changed') {
       // The resident has to read the new wording first: the dialog button now reloads the page.
-      showAlert(confirmAlert, message);
       mustReload = true;
-      confirmSubmit.textContent = '새로고침';
+      reloadMessage = message;
+      setBusy(false);
+      showAlert(confirmAlert, message);
       return;
     }
+    setBusy(false);
     if ((status === 409 || status === 422) && data.errors) {
       // Something in the form has to change (duplicate 동·호수, invalid field): show it on the form.
       window.Modal.close(confirmModal, true);
-      showErrors(data.errors);
-      showAlert(formAlert, message);
+      var maybeStored = data.code === 'duplicate' && unknownResidence === building.value + '-' + unit.value;
+      showErrors(maybeStored ? { residence: MAYBE_STORED } : data.errors);
+      showAlert(formAlert, maybeStored ? MAYBE_STORED : message);
       return;
     }
+    // No answer, a timeout or a server/proxy error: the request may still have been stored (4xx never are).
+    if (status < 400 || status >= 500) unknownResidence = building.value + '-' + unit.value;
     // Network or server trouble: stay in the dialog so trying again is one tap.
     showAlert(confirmAlert, message);
   }
@@ -453,7 +466,7 @@
     signatureInput.value = signatureDataUrl;
 
     var controller = typeof window.AbortController === 'function' ? new window.AbortController() : null;
-    var timer = setTimeout(function () { if (controller) controller.abort(); }, 30000);
+    var timer = setTimeout(function () { if (controller) controller.abort(); }, SUBMIT_TIMEOUT);
     var options = {
       method: 'POST',
       body: new FormData(form),
@@ -484,8 +497,11 @@
       });
   });
 
-  // Coming back through the back/forward cache: never leave the dialog stuck in its busy state.
   window.addEventListener('pageshow', function (event) {
+    // Browsers restore ticked boxes and typed text after back/forward or a tab restore: resync what depends on them.
+    updateSubmitState();
+    commentLength.textContent = String(comment.value.length);
+    // Coming back through the back/forward cache: never leave the dialog stuck in its busy state.
     if (!event.persisted) return;
     submitting = false;
     setBusy(false);
