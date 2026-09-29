@@ -225,7 +225,7 @@
       {{ area("overseas_purpose", "이용 목적", o.purpose, rows=2) }}
       {{ area("overseas_retention", "보유·이용기간", o.retention, rows=2) }}
       {{ area("overseas_refusal", "거부 방법과 효과", o.refusal, rows=3) }}
-      {{ area("overseas_alternative", "국외 이전에 동의하지 않는 주민의 다른 참여 방법", o.alternative, key="overseas/alternative" if o.enabled else "", help="예: 관리사무소에 비치한 서면 동의서 제출 / 다른 방법이 없으면 '온라인 외 다른 참여 방법은 없습니다'", rows=2) }}
+      {{ area("overseas_alternative", "국외 이전에 동의하지 않는 주민의 다른 참여 방법", o.alternative, key="overseas/alternative" if o.enabled else "", help="예: 서면 동의서를 대표자에게 직접 제출 / 다른 방법이 없으면 '온라인 외 다른 참여 방법은 없습니다'", rows=2) }}
       {{ input("overseas_question", "선택 질문", o.question) }}
       <div class="slot-row">
         <label class="slot-half"><span>동의 선택지</span><input class="input" name="overseas_agree_label" value="{{ o.agree_label }}" maxlength="300" autocomplete="off"></label>
