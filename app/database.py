@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 
 from sqlalchemy import create_engine, inspect, text
@@ -63,6 +64,7 @@ def _add_missing_columns(bind: Engine) -> None:
             try:
                 with bind.begin() as conn:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}"))
+                logging.getLogger("opinion").info("database: added column %s.%s", table, name)
             except SQLAlchemyError:
                 # Another instance starting at the same moment may have added it; anything else is re-raised.
                 if name not in {column["name"] for column in inspect(bind).get_columns(table)}:

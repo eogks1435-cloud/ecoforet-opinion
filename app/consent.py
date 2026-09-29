@@ -18,6 +18,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import re
 import unicodedata
 from collections.abc import Collection, Mapping
@@ -45,6 +46,8 @@ from .models import (
     OpinionDocument,
 )
 from .schemas import NAME_MAX, NAME_MIN_LETTERS, FormErrors, SignatureError, clean_text, parse_number, process_signature
+
+logger = logging.getLogger("opinion")
 
 HASH_SCHEME = "consent-json-v1"
 NEW_AGENDA_CODE = "MANAGER_REQUEST_2026"
@@ -789,6 +792,7 @@ def _seed_agendas(db: Session) -> None:
             draft.content = {**draft.content, "overseas": copy.deepcopy(SEED_CONTENT["overseas"])}
             # An editor page opened before this upgrade has no overseas fields: its save must hit the conflict check.
             draft.updated_at = datetime.now(timezone.utc)
+            logger.info("consent draft of agenda %s: overseas-transfer section added", draft.agenda_id)
             changed = True
     if changed:
         db.commit()
