@@ -116,6 +116,14 @@ def _answer_label(value: str | None) -> str:
     return consent.ANSWER_LABEL.get(value or "", "해당 없음")
 
 
+def _overseas_label(row: ConsentSubmission) -> str:
+    """동의 / 해당 없음 (the version did not ask) / 기록 없음 (asked, but taken by older code after a rollback)."""
+    if row.overseas_consent is not None:
+        return "동의" if row.overseas_consent else "동의하지 않음"
+    asked = bool((row.version.content.get("overseas") or {}).get("enabled"))
+    return "기록 없음" if asked else "해당 없음"
+
+
 def _provision_label(provision: ConsentProvision | None) -> str:
     if provision is None:
         return "해당 없음"
@@ -436,7 +444,7 @@ def consent_export(code: str, request: Request, db: Session = Depends(get_db)):
         return Response(status_code=404)
     filters, questions, recipients, _labels = _filters(request, db, agenda)
     rows = _submissions(db, agenda, filters, newest_first=False)
-    header = ["번호", "동", "호수", "성명"] + [q.title for q in questions] + ["개인정보 수집·이용"]
+    header = ["번호", "동", "호수", "성명"] + [q.title for q in questions] + ["개인정보 수집·이용", "개인정보 국외 이전"]
     header += [f"{r.short_name} 제공" for r in recipients]
     header += ["최종 확인", "제출일시(한국시간)", "문서 버전", "본문 확인값(SHA-256)", "상태", "상태 사유", "상태 처리일시",
                "제출처 전달 후 처리", "제출번호"]
@@ -446,7 +454,7 @@ def consent_export(code: str, request: Request, db: Session = Depends(get_db)):
         out.append(
             [number, row.building, row.unit, _csv_cell(row.resident_name)]
             + [_answer_label(answers.get(q.key)) for q in questions]
-            + ["동의" if row.privacy_consent else "동의하지 않음"]
+            + ["동의" if row.privacy_consent else "동의하지 않음", _overseas_label(row)]
             + [_provision_label(provisions.get(r.key)) for r in recipients]
             + [
                 "확인함" if row.final_confirmed else "",
@@ -578,6 +586,7 @@ def record_page(public_id: uuid.UUID, request: Request, db: Session = Depends(ge
             (r, provisions.get(r["key"]), consent.eligible_for(row, r["key"])) for r in content["recipients"]
         ],
         "status_labels": consent.STATUS_LABEL,
+        "overseas_label": _overseas_label(row),
     }
     return templates.TemplateResponse(request, "admin_consent_record.html", context)
 
@@ -732,7 +741,8 @@ def _editor_context(request: Request, db: Session, agenda: Agenda, content: dict
     )
     digest = consent.content_hash(content)
     reworded = consent.reworded_questions(version.content if version else None, content)
-    missing = {"/".join(path) for path, _label in consent.REQUIRED_SETTINGS if not consent._get(content, path).strip()}
+    missing = {"/".join(path) for path, _label in consent.required_settings(content)
+               if not consent._get(content, path).strip()}
     if content["privacy"]["collect_access_info"] and not content["privacy"]["retention_access"].strip():
         missing.add("privacy/retention_access")
     return {

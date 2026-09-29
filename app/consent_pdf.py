@@ -235,6 +235,24 @@ def _privacy_notice(doc: _Doc, content: Mapping) -> None:
     doc.rich(privacy["refusal"])
 
 
+def _overseas_notice(doc: _Doc, overseas: Mapping) -> None:
+    doc.heading(overseas["title"])
+    doc.rich(overseas["intro"])
+    for label, name in (("이전되는 항목", "items"), ("이전되는 국가", "country"), ("이전 시기와 방법", "timing"),
+                        ("이전받는 자", "recipient"), ("이용 목적", "purpose"), ("보유·이용기간", "retention")):
+        doc.label_value(label, overseas[name])
+    doc.line("거부 방법과 효과", bold=True, height=6)
+    doc.rich(overseas["refusal"])
+    if overseas.get("alternative"):
+        doc.label_value("다른 참여 방법", overseas["alternative"])
+
+
+def _overseas_of(content: Mapping) -> Mapping | None:
+    """The overseas-transfer section when this wording has it (versions from before it existed do not)."""
+    overseas = content.get("overseas") or {}
+    return overseas if overseas.get("enabled") else None
+
+
 def _recipient_notice(doc: _Doc, recipient: Mapping) -> None:
     doc.heading(recipient["heading"], 2)
     doc.label_value("(1) 제공받는 자", recipient["name"])
@@ -262,6 +280,10 @@ def _wording_only(doc: _Doc, content: Mapping) -> None:
     doc.heading(content["participation_notes_title"], 2)
     doc.rich(content["participation_notes"])
     _privacy_notice(doc, content)
+    overseas = _overseas_of(content)
+    if overseas:
+        _overseas_notice(doc, overseas)
+        doc.line(f"{NOT_SELECTED} {overseas['agree_label']}      {NOT_SELECTED} {overseas['disagree_label']}", height=6.4)
     doc.heading(content["provision_title"])
     doc.rich(content["provision_intro"])
     for recipient in content["recipients"]:
@@ -322,6 +344,13 @@ def build_consent_pdf(row: ConsentSubmission, recipient_key: str | None = None) 
     privacy = content["privacy"]
     doc.line(privacy["question"], bold=True, height=6.2)
     doc.choice(privacy["agree_label"], privacy["disagree_label"], OPINION_AGREE if row.privacy_consent else "DISAGREE")
+
+    overseas = _overseas_of(content)
+    if overseas:
+        _overseas_notice(doc, overseas)
+        doc.line(overseas["question"], bold=True, height=6.2)
+        doc.choice(overseas["agree_label"], overseas["disagree_label"],
+                   None if row.overseas_consent is None else (OPINION_AGREE if row.overseas_consent else "DISAGREE"))
 
     doc.heading(content["provision_title"])
     doc.rich(content["provision_intro"])

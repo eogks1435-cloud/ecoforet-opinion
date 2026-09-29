@@ -60,6 +60,7 @@ def ready_content() -> dict:
     for recipient in content["recipients"]:
         recipient["retention"] = f"테스트용 {recipient['short_name']} 보유기간"
         recipient["delivery"] = f"테스트용 {recipient['short_name']} 제출 방식"
+    content["overseas"]["alternative"] = "테스트용 다른 참여 방법"
     return content
 
 
@@ -90,6 +91,7 @@ def consent_form(answers=("AGREE", "AGREE", "AGREE"), company="AGREE", district=
         "answer_q2": answers[1],
         "answer_q3": answers[2],
         "privacy_consent": "AGREE",
+        "overseas_consent": "AGREE",
         "provide_company": company,
         "provide_district": district,
         "final_confirmed": "on",
@@ -203,9 +205,10 @@ def test_publish_is_blocked_until_the_operator_settings_are_filled(admin, db):
         consent.publish(db, agenda, None)
     db.rollback()
     message = str(caught.value)
-    for label in ("참여 대상", "수집·관리 주체", "관리책임자", "연락처", "동의자료 보유", "저장 위치", "접속 IP", "케이비아주",
-                  "강동구", "파기 대상", "제출 방식"):
+    for label in ("참여 대상", "수집·관리 주체", "관리책임자", "연락처", "동의자료 보유", "접속 IP", "케이비아주",
+                  "강동구", "파기 대상", "제출 방식", "다른 참여 방법"):
         assert label in message
+    assert "저장 위치" not in message  # the overseas-transfer section says where the data is stored
     csrf = admin_csrf(admin)
     page = admin.get(f"/admin/consent/{CODE}/edit").text
     assert "게시 전에 확인할 항목" in page and "disabled" in page
@@ -253,6 +256,7 @@ def test_hash_covers_every_part_of_the_wording():
         lambda c: c["recipients"][1].update(retention="다른 기간"),
         lambda c: c.update(final_checkbox="다른 확인 문구"),
         lambda c: c.update(recipient_line="다른 수신"),
+        lambda c: c["overseas"].update(country="다른 국가"),
     ]
     changed = 0
     for change in changes:
@@ -283,9 +287,11 @@ def test_public_page_after_the_switch_shows_real_unselected_choices(client, db):
     publish_ready(db)
     page = client.get("/opinion").text
     assert 'id="consent-form"' in page and f'name="version_label" value="{V1}"' in page
-    assert page.count('<fieldset class="question"') == 6  # 3 questions + privacy + 2 recipients
+    assert page.count('<fieldset class="question"') == 7  # 3 questions + privacy + overseas + 2 recipients
     radios = re.findall(r'<input class="choice-input" type="radio"[^>]*>', page)
-    assert len(radios) == 12 and not any("checked" in radio for radio in radios)
+    assert len(radios) == 14 and not any("checked" in radio for radio in radios)
+    assert "5-1. 개인정보 국외 이전 동의" in page and "Render Services, Inc." in page and "테스트용 다른 참여 방법" in page
+    assert page.index("5. 개인정보 수집·이용 동의") < page.index("5-1. 개인정보 국외 이전") < page.index("6. 개인정보 제3자")
     assert 'name="final_confirmed"' in page and "checked" not in re.search(r'<input[^>]*name="final_confirmed"[^>]*>', page).group(0)
     for word in ("전자투표", "온라인 투표", "해임 확정", "[게시 전 입력", "□ 동의"):
         assert word not in page
@@ -307,6 +313,8 @@ def test_the_legacy_form_is_refused_after_the_switch(client, submit, db):
         ({"answer_q3": "MAYBE"}, "answer_q3"),
         ({"privacy_consent": "DISAGREE"}, "privacy_consent"),
         ({"privacy_consent": ""}, "privacy_consent"),
+        ({"overseas_consent": ""}, "overseas_consent"),
+        ({"overseas_consent": "DISAGREE"}, "overseas_consent"),
         ({"provide_district": ""}, "provide_district"),
         ({"final_confirmed": ""}, "final_confirmed"),
         ({"building": ""}, "residence"),
@@ -906,3 +914,82 @@ def test_answers_and_provisions_are_stored_per_question_key(client, db):
     assert provisions == [("company", False), ("district", True)]
     assert (row.agenda_id, row.version_label, row.content_hash) == (agenda_of(db).id, V1, row.version.content_hash)
     assert row.access_info_collected and row.ip_address and row.user_agent
+    assert row.overseas_consent is True
+
+
+def test_overseas_transfer_consent_is_asked_stored_exported_and_printed(admin, db):
+    publish_ready(db)
+    refused = post_consent(admin, overseas_consent="DISAGREE")
+    assert refused.status_code == 422 and "국외 이전" in refused.json()["errors"]["overseas_consent"]
+    assert post_consent(admin, unit="2401").status_code == 201
+    row = rows_of(db)[0]
+    assert row.overseas_consent is True
+    table = read_csv(admin.get(f"/admin/consent/{CODE}/export.csv"))
+    assert table[1][table[0].index("개인정보 국외 이전")] == "동의"
+    assert "개인정보 국외 이전</dt><dd>동의" in admin.get(f"/admin/consent-submissions/{row.public_id}").text
+    text = pdf_text(admin.get(f"/admin/consent-submissions/{row.public_id}/pdf").content)
+    assert "5-1. 개인정보 국외 이전 동의" in text and "Render Services, Inc." in text
+    after = text.split("국외 이전(보관)에 동의하십니까?")[1]
+    assert after.lstrip().startswith("● 동의합니다")
+    listing = pdf_text(admin.get(f"/admin/consent/{CODE}/recipients/company.pdf").content)
+    assert "5-1. 개인정보 국외 이전 동의" in listing  # the wording appendix shows it too
+
+
+def test_wording_without_the_overseas_section_does_not_ask_it(admin, db):
+    content = ready_content()
+    content["overseas"]["enabled"] = False
+    content["privacy"]["storage_location"] = ""
+    assert any("저장 위치" in problem for problem in consent.publish_blockers(content))  # then it must be stated
+    content["privacy"]["storage_location"] = "테스트용 국내 서버"
+    publish_ready(db, content=content)
+    page = admin.get("/opinion").text
+    assert 'data-field="overseas_consent"' not in page and "테스트용 국내 서버" in page
+    form = consent_form(unit="2402")
+    del form["overseas_consent"]
+    assert post_consent(admin, form).status_code == 201
+    row = rows_of(db)[0]
+    assert row.overseas_consent is None
+    table = read_csv(admin.get(f"/admin/consent/{CODE}/export.csv"))
+    assert table[1][table[0].index("개인정보 국외 이전")] == "해당 없음"
+    assert "이 버전은 묻지 않음" in admin.get(f"/admin/consent-submissions/{row.public_id}").text
+    assert "국외 이전" not in pdf_text(admin.get(f"/admin/consent-submissions/{row.public_id}/pdf").content)
+
+
+def test_a_draft_saved_before_the_overseas_section_gets_it_and_a_stale_page_cannot_erase_it(admin, db):
+    from app.consent import seed_agendas
+    from app.models import ConsentDraft
+
+    agenda = agenda_of(db)
+    old = {key: value for key, value in ready_content().items() if key != "overseas"}
+    draft = db.get(ConsentDraft, agenda.id)
+    draft.content = old
+    db.commit()
+    stale = editor_fields(admin.get(f"/admin/consent/{CODE}/edit").text)
+    stale = {key: value for key, value in stale.items() if not key.startswith("overseas_")}  # an old editor page
+
+    seed_agendas(db)  # what the next start does
+    db.expire_all()
+    upgraded = db.get(ConsentDraft, agenda.id).content
+    assert upgraded["overseas"] == consent.SEED_CONTENT["overseas"]
+    assert {key: value for key, value in upgraded.items() if key != "overseas"} == old  # nothing else touched
+
+    conflict = admin.post(f"/admin/consent/{CODE}/draft", data=stale, follow_redirects=False)
+    assert conflict.status_code == 409
+    db.expire_all()
+    assert db.get(ConsentDraft, agenda.id).content["overseas"]["enabled"] is True
+
+
+def test_a_column_added_later_is_created_on_an_existing_table(tmp_path):
+    from sqlalchemy import create_engine, inspect, text
+
+    from app.database import Base
+
+    engine_ = create_engine("sqlite:///" + (tmp_path / "old_test").as_posix())
+    Base.metadata.create_all(engine_)
+    with engine_.begin() as conn:
+        conn.execute(text("ALTER TABLE consent_submissions DROP COLUMN overseas_consent"))  # the table as first deployed
+    assert "overseas_consent" not in {c["name"] for c in inspect(engine_).get_columns("consent_submissions")}
+    init_db(engine_)
+    init_db(engine_)  # a second start changes nothing
+    assert "overseas_consent" in {c["name"] for c in inspect(engine_).get_columns("consent_submissions")}
+    engine_.dispose()

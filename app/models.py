@@ -199,6 +199,9 @@ class ConsentSubmission(Base):
     resident_name: Mapped[str] = mapped_column(String(50), nullable=False)
     signature_data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, deferred=True)
     privacy_consent: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    # Separate consent to storing the data abroad; NULL when the version did not ask it. Added after the table
+    # was first created in production, so init_db adds the column to an existing table (see database.py).
+    overseas_consent: Mapped[bool | None] = mapped_column(Boolean)
     final_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False)
     # Random per page load: a retried request with the same token returns the first result instead of a copy.
     client_token: Mapped[str | None] = mapped_column(String(64), unique=True)

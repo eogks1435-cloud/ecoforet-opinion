@@ -92,7 +92,7 @@
 
     <nav class="editor-toc" aria-label="편집 항목">
       <a href="#ed-head">머리글</a><a href="#ed-body">본문</a><a href="#ed-questions">질문</a><a href="#ed-participant">참여자 확인</a>
-      <a href="#ed-privacy">개인정보 수집·이용</a><a href="#ed-provision">제3자 제공</a><a href="#ed-final">최종 확인</a>
+      <a href="#ed-privacy">개인정보 수집·이용</a><a href="#ed-overseas">국외 이전</a><a href="#ed-provision">제3자 제공</a><a href="#ed-final">최종 확인</a>
     </nav>
 
     <section class="panel" id="ed-head">
@@ -197,7 +197,7 @@
       {% endif %}
       {{ area("privacy_retention_notes", "파기 안내", p.retention_notes, rows=4) }}
       {{ area("privacy_destruction_plan", "운영 확인: 보유기간 종료 후 파기 대상·실행 방법·백업 처리 (주민 화면에 표시되지 않음)", p.destruction_plan, key="privacy/destruction_plan", help="예: 무엇을 언제 지우는지, 누가 어떤 방법으로 지우는지, DB 백업·내려받은 파일은 어떻게 처리하는지", rows=4) }}
-      {{ area("privacy_storage_location", "개인정보 저장 위치", p.storage_location, key="privacy/storage_location", help="서버 소재지와 국외 저장·이전 여부 및 필요한 안내", rows=3) }}
+      {{ area("privacy_storage_location", "개인정보 저장 위치", p.storage_location, key="privacy/storage_location" if not c.overseas.enabled else "", help="아래 '국외 이전 동의'를 켜 두면 비워 두세요(그 부분이 저장 위치를 안내합니다). 끈 경우에만 서버 소재지를 적습니다.", rows=3) }}
       {{ area("privacy_refusal", "동의 거부권 및 거부 시 영향", p.refusal, rows=4) }}
       {{ input("privacy_question", "선택 질문", p.question) }}
       <div class="slot-row">
@@ -205,6 +205,32 @@
         <label class="slot-half"><span>비동의 선택지</span><input class="input" name="privacy_disagree_label" value="{{ p.disagree_label }}" maxlength="300" autocomplete="off"></label>
       </div>
       <p class="field-help">개인정보 수집·이용에 '동의하지 않습니다'를 고르면 제출할 수 없습니다(기명 접수 불가 안내와 일치).</p>
+    </section>
+
+    {% set o = c.overseas %}
+    <section class="panel" id="ed-overseas">
+      <h2 class="panel-title">개인정보 국외 이전</h2>
+      <div class="doc-field">
+        <label class="check-line"><input type="checkbox" name="overseas_enabled" value="1"{% if o.enabled %} checked{% endif %}>
+          국외 이전 동의를 따로 받음 (서버가 해외에 있으면 켜 둡니다)</label>
+        <p class="field-help">켜 두면 주민 화면에 이 안내와 동의 질문이 나오고, 동의해야 제출할 수 있습니다. 끄면 이 부분이 빠지고 위 '개인정보 저장 위치'를 채워야 게시할 수 있습니다.</p>
+      </div>
+      {{ input("overseas_title", "영역 제목", o.title) }}
+      {{ area("overseas_intro", "안내", o.intro, rows=3) }}
+      {{ area("overseas_items", "이전되는 항목", o['items'], rows=2) }}
+      {{ area("overseas_country", "이전되는 국가", o.country, rows=2) }}
+      {{ area("overseas_timing", "이전 시기와 방법", o.timing, rows=2) }}
+      {{ area("overseas_recipient", "이전받는 자 (명칭과 연락처)", o.recipient, rows=2) }}
+      {{ area("overseas_purpose", "이용 목적", o.purpose, rows=2) }}
+      {{ area("overseas_retention", "보유·이용기간", o.retention, rows=2) }}
+      {{ area("overseas_refusal", "거부 방법과 효과", o.refusal, rows=3) }}
+      {{ area("overseas_alternative", "국외 이전에 동의하지 않는 주민의 다른 참여 방법", o.alternative, key="overseas/alternative" if o.enabled else "", help="예: 관리사무소에 비치한 서면 동의서 제출 / 다른 방법이 없으면 '온라인 외 다른 참여 방법은 없습니다'", rows=2) }}
+      {{ input("overseas_question", "선택 질문", o.question) }}
+      <div class="slot-row">
+        <label class="slot-half"><span>동의 선택지</span><input class="input" name="overseas_agree_label" value="{{ o.agree_label }}" maxlength="300" autocomplete="off"></label>
+        <label class="slot-half"><span>비동의 선택지</span><input class="input" name="overseas_disagree_label" value="{{ o.disagree_label }}" maxlength="300" autocomplete="off"></label>
+      </div>
+      <p class="field-help">국외 이전에 '동의하지 않습니다'를 고르면 제출할 수 없습니다(거부 안내와 일치).</p>
     </section>
 
     <section class="panel" id="ed-provision">

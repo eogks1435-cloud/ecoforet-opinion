@@ -305,6 +305,7 @@ def submit_consent(
             resident_name=data.resident_name,
             signature_data=data.signature_png,
             privacy_consent=True,
+            overseas_consent=data.overseas,
             final_confirmed=True,
             client_token=data.client_token,
             request_hash=data.request_hash(version.label),

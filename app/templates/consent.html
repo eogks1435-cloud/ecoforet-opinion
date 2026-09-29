@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% from "_consent.html" import rich, setting, choice_pair %}
 {% set p = c.privacy %}
+{% set o = c.overseas %}
+{% set overseas_on = o and o.enabled %}
 {% set hints = c.field_hints %}
 
 {% block title %}{{ c.title }} {{ c.subtitle }}{% endblock %}
@@ -147,7 +149,7 @@
         {% endif %}
       </dl>
       {{ rich(p.retention_notes) }}
-      {% if p.storage_location or preview %}
+      {% if p.storage_location or (preview and not overseas_on) %}
       <h3 class="sub-title">개인정보 저장 위치</h3>
       {{ setting(p.storage_location, "서버 소재지·국외 이전 여부 안내", preview) }}
       {% endif %}
@@ -158,6 +160,28 @@
         {{ choice_pair("privacy_consent", p.agree_label, p.disagree_label) }}
       </fieldset>
     </section>
+
+    {% if overseas_on %}
+    <section class="section consent-overseas" aria-labelledby="overseas-title">
+      <h2 class="section-title" id="overseas-title">{{ o.title }}</h2>
+      {{ rich(o.intro) }}
+      <dl class="info-list">
+        <div><dt>이전되는 항목</dt><dd>{{ rich(o['items']) }}</dd></div>
+        <div><dt>이전되는 국가</dt><dd>{{ rich(o.country) }}</dd></div>
+        <div><dt>이전 시기와 방법</dt><dd>{{ rich(o.timing) }}</dd></div>
+        <div><dt>이전받는 자</dt><dd>{{ rich(o.recipient) }}</dd></div>
+        <div><dt>이용 목적</dt><dd>{{ rich(o.purpose) }}</dd></div>
+        <div><dt>보유·이용기간</dt><dd>{{ rich(o.retention) }}</dd></div>
+      </dl>
+      <p class="info-label">거부 방법과 효과</p>
+      {{ rich(o.refusal) }}
+      <div class="participant-target"><p class="info-label">다른 참여 방법</p>{{ setting(o.alternative, "국외 이전에 동의하지 않는 주민의 다른 참여 방법", preview) }}</div>
+      <fieldset class="question" data-field="overseas_consent" data-summary="개인정보 국외 이전">
+        <legend class="question-title">{{ o.question }}</legend>
+        {{ choice_pair("overseas_consent", o.agree_label, o.disagree_label) }}
+      </fieldset>
+    </section>
+    {% endif %}
 
     <section class="section" aria-labelledby="provision-title">
       <h2 class="section-title" id="provision-title">{{ c.provision_title }}</h2>

@@ -31,6 +31,7 @@
       <div><dt>문서 버전</dt><dd><a class="text-link" href="/admin/consent/{{ agenda.code }}/versions/{{ row.version_label }}">{{ row.version_label }}</a></dd></div>
       <div><dt>본문 확인값</dt><dd class="break"><code>{{ row.content_hash }}</code></dd></div>
       <div><dt>개인정보 수집·이용</dt><dd>{{ "동의" if row.privacy_consent else "동의하지 않음" }}</dd></div>
+      <div><dt>개인정보 국외 이전</dt><dd>{{ overseas_label }}{% if overseas_label == "해당 없음" %} (이 버전은 묻지 않음){% elif overseas_label == "기록 없음" %} (묻는 버전이지만 답변이 저장되지 않음 — 이전 코드로 받은 제출){% endif %}</dd></div>
       <div><dt>최종 확인</dt><dd>{{ "확인함" if row.final_confirmed else "-" }}</dd></div>
     </dl>
     <div class="doc-actions">

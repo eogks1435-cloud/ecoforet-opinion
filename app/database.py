@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from .config import settings
@@ -47,6 +48,27 @@ def get_db() -> Iterator[Session]:
         db.close()
 
 
+# Columns added to a table after it was first created. create_all() never alters an existing table, so these are
+# added here: nullable, no default, no rewrite of existing rows. Older code simply does not read them.
+ADDED_COLUMNS = {"consent_submissions": {"overseas_consent": "BOOLEAN"}}
+
+
+def _add_missing_columns(bind: Engine) -> None:
+    for table, columns in ADDED_COLUMNS.items():
+        if not inspect(bind).has_table(table):
+            continue
+        for name, sql_type in columns.items():
+            if name in {column["name"] for column in inspect(bind).get_columns(table)}:
+                continue
+            try:
+                with bind.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}"))
+            except SQLAlchemyError:
+                # Another instance starting at the same moment may have added it; anything else is re-raised.
+                if name not in {column["name"] for column in inspect(bind).get_columns(table)}:
+                    raise
+
+
 def init_db(bind: Engine | None = None) -> None:
     """Create missing tables and seed the first document version and the agendas.
 
@@ -60,6 +82,7 @@ def init_db(bind: Engine | None = None) -> None:
 
     bind = bind or engine
     Base.metadata.create_all(bind=bind, checkfirst=True)
+    _add_missing_columns(bind)
     with sessionmaker(bind=bind, autoflush=False, expire_on_commit=False)() as db:
         seed_initial_document(db)
         seed_agendas(db)

@@ -272,6 +272,35 @@ SEED_CONTENT: dict = {
         "question": "위 개인정보 수집·이용에 동의하십니까?",
         **_YES_NO,
     },
+    # Separate consent to storing the data abroad: the service and its database run in Render's Singapore region
+    # (Render Services, Inc., privacy@render.com per Render's privacy policy). Checked facts, still editable.
+    "overseas": {
+        "enabled": True,
+        "title": "5-1. 개인정보 국외 이전 동의",
+        "intro": (
+            "온라인 동의서로 제출하신 개인정보는 해외 클라우드 서버에 저장됩니다. 국외 이전에 대한 동의는 "
+            "개인정보 수집·이용 동의와 별도로 받습니다."
+        ),
+        "items": "위 5. ③의 수집 항목 전부",
+        "country": (
+            "싱가포르(Render 싱가포르 리전 서버). 서비스 제공자가 미국 법인이므로 서비스 운영 과정에서 미국 등에서 "
+            "접근·처리될 수 있습니다."
+        ),
+        "timing": "온라인 동의서를 제출하는 즉시 암호화된 통신(HTTPS)으로 전송되어 저장됩니다.",
+        "recipient": "Render Services, Inc.(미국 클라우드 서비스 사업자), 개인정보 문의 privacy@render.com",
+        "purpose": "온라인 동의서 서비스의 서버 운영과 자료 보관",
+        "retention": (
+            "위 5. ④의 보유·이용기간 동안 보관한 뒤 삭제합니다. 삭제 후에도 서비스 복구용 자동 백업에는 최대 7일간 "
+            "남을 수 있습니다."
+        ),
+        "refusal": (
+            "개인정보 국외 이전에 동의하지 않을 권리가 있습니다. 다만 이 온라인 동의서는 해외 서버에 저장되므로, "
+            "동의하지 않으시면 온라인으로 제출할 수 없습니다."
+        ),
+        "alternative": "",  # operator decision: how residents who decline can still take part
+        "question": "위 개인정보의 국외 이전(보관)에 동의하십니까?",
+        **_YES_NO,
+    },
     "provision_title": "6. 개인정보 제3자 제공 동의",
     "provision_intro": (
         "본인이 동의한 요청사항의 제출과 확인을 위하여 아래와 같이 개인정보를 제공하고자 합니다.\n\n"
@@ -336,9 +365,17 @@ REQUIRED_SETTINGS = (
     (("privacy", "officer"), "개인정보 관리책임자 (성명)"),
     (("privacy", "contact"), "문의·열람·정정·철회 요청 연락처 (전화번호 또는 이메일)"),
     (("privacy", "retention_records"), "동의자료 보유·이용기간 (또는 명확한 종료 기준)"),
-    (("privacy", "storage_location"), "개인정보 저장 위치·국외 이전 안내 (서버 소재지 등)"),
     (("privacy", "destruction_plan"), "보유기간 종료 후 파기 대상·실행 방법·백업 처리 (운영 확인, 주민 화면 미표시)"),
 )
+_OVERSEAS_ALTERNATIVE = (("overseas", "alternative"),
+                         "국외 이전에 동의하지 않는 주민의 다른 참여 방법 (없으면 '온라인 외 다른 참여 방법은 없습니다'처럼 입력)")
+_STORAGE_LOCATION = (("privacy", "storage_location"), "개인정보 저장 위치·국외 이전 안내 (서버 소재지 등)")
+
+
+def required_settings(content: Mapping) -> list[tuple[tuple[str, ...], str]]:
+    """Operator values this wording needs before it can be published (they depend on its own settings)."""
+    overseas_on = bool((content.get("overseas") or {}).get("enabled"))
+    return [*REQUIRED_SETTINGS, _OVERSEAS_ALTERNATIVE if overseas_on else _STORAGE_LOCATION]
 
 
 # ------------------------------------------------------------------------------------------- text helpers
@@ -450,16 +487,29 @@ def normalize_content(raw: Mapping) -> dict:
         item["disagree_label"] = item["disagree_label"] or "동의하지 않습니다"
         recipients.append(item)
 
+    raw_overseas = raw.get("overseas")
+    source = raw_overseas or {}
+    overseas = {
+        key: (text_of(source, key) if key in _OVERSEAS_TEXT_KEYS else line_of(source, key))
+        for key in seed["overseas"]
+        if key != "enabled"
+    }
+    # Wording from before this section existed has none: it stays off (versions published then never asked it).
+    overseas["enabled"] = bool(source.get("enabled", False)) if raw_overseas is not None else False
+    overseas["agree_label"] = overseas["agree_label"] or "동의합니다"
+    overseas["disagree_label"] = overseas["disagree_label"] or "동의하지 않습니다"
+
     hints = raw.get("field_hints") or {}
     content = {
         key: (text_of(raw, key) if key in _TOP_TEXT_KEYS else line_of(raw, key))
         for key in seed
-        if key not in ("sections", "questions", "privacy", "recipients", "field_hints")
+        if key not in ("sections", "questions", "privacy", "overseas", "recipients", "field_hints")
     }
     content.update(
         sections=sections,
         questions=questions,
         privacy=privacy,
+        overseas=overseas,
         recipients=recipients,
         field_hints={name: line_of(hints, name) for name in seed["field_hints"]},
     )
@@ -473,6 +523,8 @@ _TOP_TEXT_KEYS = {
 _PRIVACY_TEXT_KEYS = {"purpose", "retention_notes", "refusal", "storage_location", "items_input", "items_generated",
                       "destruction_plan"}
 _RECIPIENT_TEXT_KEYS = {"purpose", "items", "refusal", "retention", "delivery"}
+_OVERSEAS_TEXT_KEYS = {"intro", "items", "country", "timing", "recipient", "purpose", "retention", "refusal",
+                       "alternative"}
 
 
 def seed_content() -> dict:
@@ -537,8 +589,15 @@ def _all_texts(content: Mapping) -> list[str]:
 def publish_blockers(content: Mapping) -> list[str]:
     """Why this wording may not be published yet (empty list = publishable)."""
     content = normalize_content(content)
-    problems = [f"미입력: {label}" for path, label in REQUIRED_SETTINGS if not _get(content, path).strip()]
+    problems = [f"미입력: {label}" for path, label in required_settings(content) if not _get(content, path).strip()]
     privacy = content["privacy"]
+    overseas = content["overseas"]
+    if overseas["enabled"]:
+        for name, label in (("title", "제목"), ("items", "이전되는 항목"), ("country", "이전되는 국가"),
+                            ("timing", "이전 시기와 방법"), ("recipient", "이전받는 자"), ("purpose", "이용 목적"),
+                            ("retention", "보유·이용기간"), ("refusal", "거부 방법과 효과"), ("question", "선택 질문")):
+            if not overseas[name].strip():
+                problems.append(f"미입력: 개인정보 국외 이전 안내의 {label}")
     if privacy["collect_access_info"] and not privacy["retention_access"].strip():
         problems.append("미입력: 접속 IP 주소·브라우저 정보 보유기간 (보안 목적에 필요한 실제 기간)")
     for recipient in content["recipients"]:
@@ -656,12 +715,15 @@ def content_from_form(form: Mapping[str, str], base: Mapping, reserved: Collecti
 
     privacy = {name: value(f"privacy_{name}") for name in base["privacy"] if name != "collect_access_info"}
     privacy["collect_access_info"] = bool(value("privacy_collect_access_info"))
+    overseas = {name: value(f"overseas_{name}") for name in base["overseas"] if name != "enabled"}
+    overseas["enabled"] = bool(value("overseas_enabled"))
 
     raw = {name: value(name) for name in base if isinstance(base[name], str)}
     raw.update(
         sections=[item[2] for item in sections],
         questions=[item[2] for item in questions],
         privacy=privacy,
+        overseas=overseas,
         recipients=recipients,
         field_hints={name: value(f"hint_{name}") for name in base["field_hints"]},
     )
@@ -722,6 +784,12 @@ def _seed_agendas(db: Session) -> None:
         db.flush()
         db.add(ConsentDraft(agenda_id=agenda.id, content=seed_content()))
         changed = True
+    for draft in db.scalars(select(ConsentDraft)).all():
+        if "overseas" not in (draft.content or {}):  # a draft saved before the overseas section existed
+            draft.content = {**draft.content, "overseas": copy.deepcopy(SEED_CONTENT["overseas"])}
+            # An editor page opened before this upgrade has no overseas fields: its save must hit the conflict check.
+            draft.updated_at = datetime.now(timezone.utc)
+            changed = True
     if changed:
         db.commit()
 
@@ -897,6 +965,7 @@ class ConsentInput:
     answers: dict[str, str]
     provisions: dict[str, bool]
     client_token: str | None
+    overseas: bool | None = None  # None: the version did not ask for overseas-transfer consent
 
     def request_hash(self, version_label: str) -> str:
         payload = {
@@ -908,11 +977,16 @@ class ConsentInput:
             "provisions": self.provisions,
             "signature": hashlib.sha256(self.signature_png).hexdigest(),
         }
+        if self.overseas is not None:
+            payload["overseas"] = self.overseas
         canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 _TOKEN = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+OVERSEAS_REQUIRED_MESSAGE = (
+    "개인정보 국외 이전에 동의하지 않으면 온라인으로 제출할 수 없습니다. 안내된 다른 참여 방법을 이용해 주세요."
+)
 
 
 def valid_token(token: str | None) -> bool:
@@ -963,6 +1037,16 @@ def validate_consent(form: Mapping[str, str], content: Mapping) -> ConsentInput:
     elif privacy != OPINION_AGREE:
         errors["privacy_consent"] = "개인정보 수집·이용 동의 여부를 선택해 주세요."
 
+    overseas = None
+    if (content.get("overseas") or {}).get("enabled"):
+        value = (form.get("overseas_consent") or "").strip()
+        if value == OPINION_DISAGREE:
+            errors["overseas_consent"] = OVERSEAS_REQUIRED_MESSAGE
+        elif value != OPINION_AGREE:
+            errors["overseas_consent"] = "개인정보 국외 이전 동의 여부를 선택해 주세요."
+        else:
+            overseas = True
+
     provisions = {}
     for recipient in content["recipients"]:
         value = (form.get(f"provide_{recipient['key']}") or "").strip()
@@ -985,6 +1069,7 @@ def validate_consent(form: Mapping[str, str], content: Mapping) -> ConsentInput:
         answers=answers,
         provisions=provisions,
         client_token=token if _TOKEN.match(token) else None,
+        overseas=overseas,
     )
 
 

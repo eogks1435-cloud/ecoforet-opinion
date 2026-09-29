@@ -25,6 +25,7 @@
 
   var TEMP_FAILURE = '일시적으로 제출하지 못했습니다. 잠시 후 다시 시도해 주세요.';
   var PRIVACY_REQUIRED = '개인정보 수집·이용에 동의하지 않으면 온라인 동의서를 제출할 수 없습니다.';
+  var OVERSEAS_REQUIRED = '개인정보 국외 이전에 동의하지 않으면 온라인으로 제출할 수 없습니다. 안내된 다른 참여 방법을 이용해 주세요.';
   var SUBMIT_TIMEOUT = 90000; // a sleeping free instance can take about a minute to wake up
   var KEEP_KEY = 'consent-kept-fields';
 
@@ -165,6 +166,8 @@
     var name = event.target.name;
     if (name === 'privacy_consent') {
       setError(name, event.target.value === 'DISAGREE' ? PRIVACY_REQUIRED : '');
+    } else if (name === 'overseas_consent') {
+      setError(name, event.target.value === 'DISAGREE' ? OVERSEAS_REQUIRED : '');
     } else if (name && (name.indexOf('answer_') === 0 || name.indexOf('provide_') === 0)) {
       setError(name, '');
     } else if (event.target === finalBox) {
@@ -182,6 +185,7 @@
       }
     }
     if (checkedValue('privacy_consent') === 'DISAGREE') errors.privacy_consent = PRIVACY_REQUIRED;
+    if (checkedValue('overseas_consent') === 'DISAGREE') errors.overseas_consent = OVERSEAS_REQUIRED;
     var b = building.value;
     var u = unit.value;
     var numberOk = function (value) { return /^[0-9]{1,4}$/.test(value) && parseInt(value, 10) > 0; };
