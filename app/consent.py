@@ -3,8 +3,9 @@
 The wording of a consent agenda is one JSON object (see SEED_CONTENT for every field). Rules:
 - Text fields support only: a blank line starts a paragraph, a single line break is kept, **text** is bold.
   Nothing else is interpreted (HTML is escaped when shown).
-- Questions (q1, q2, ...) and recipients (company, district) have fixed keys. A key is never reused, so an
-  answer stays tied to the wording it was given under; a question is deactivated, not deleted.
+- Questions (q1, q2, ...) and recipients (company, district, then recipient3, ... added in the editor) have
+  fixed keys. A key is never reused, so an answer or a provision stays tied to the wording it was given under;
+  a question is deactivated, not deleted, and a recipient is never removed from the draft.
 - The admin edits a draft; publishing copies it into a new immutable version (consent_versions). The
   version's SHA-256 (hash scheme "consent-json-v1") covers the whole normalised JSON: every text shown to the
   resident, the questions and choice labels, the privacy and provision notices, the final confirmation and
@@ -61,6 +62,7 @@ LINE_MAX = 300
 TEXT_MAX = 6000
 SECTIONS_MAX = 30
 QUESTIONS_MAX = 10
+RECIPIENTS_MAX = 5
 PLACEHOLDER_MARK = "[게시 전 입력"
 ACCESS_INFO_TEXT = "접속 IP 주소, 브라우저 정보"
 ACCESS_INFO_WORDS = ("IP 주소", "브라우저 정보")
@@ -478,7 +480,7 @@ def normalize_content(raw: Mapping) -> dict:
     privacy["disagree_label"] = privacy["disagree_label"] or "동의하지 않습니다"
 
     recipients, seen = [], set()
-    for recipient in list(raw.get("recipients") or [])[:5]:
+    for recipient in list(raw.get("recipients") or [])[:RECIPIENTS_MAX]:
         key = str(recipient.get("key") or "")
         if not _KEY.match(key) or key in seen:
             continue
@@ -642,12 +644,13 @@ def publish_blockers(content: Mapping) -> list[str]:
 
 # ------------------------------------------------------------------------------ admin editor form parsing
 def content_from_form(form: Mapping[str, str], base: Mapping, reserved: Collection[str] = (),
-                      published: Mapping | None = None) -> dict:
-    """Build a draft from the admin editor's fields. Keys of questions/recipients come from `base` only.
+                      published: Mapping | None = None, reserved_recipients: Collection[str] = ()) -> dict:
+    """Build a draft from the admin editor's fields. Keys of questions/recipients come from `base`, or are new.
 
     `reserved`: question keys the agenda ever used (every published version); a new question never gets one.
     `published`: the current version; a question split off ("새 질문으로 분리") leaves its old key with the
     wording published under it, not the edited one.
+    `reserved_recipients`: recipient keys the agenda ever used; a recipient added in the empty slot never gets one.
     """
     base = normalize_content(base)
     published_questions = {q["key"]: q for q in normalize_content(published)["questions"]} if published else {}
@@ -707,13 +710,27 @@ def content_from_form(form: Mapping[str, str], base: Mapping, reserved: Collecti
 
     recipients = []
     for recipient in base["recipients"]:
-        index = next((i for i in range(6) if form.get(f"r{i}_key") == recipient["key"]), None)
+        index = next((i for i in range(RECIPIENTS_MAX + 1) if form.get(f"r{i}_key") == recipient["key"]), None)
         if index is None:
             recipients.append(recipient)
             continue
         prefix = f"r{index}_"
         recipients.append({"key": recipient["key"], **{
             name: value(prefix + name) for name in recipient if name != "key"
+        }})
+    # "새 제출처 추가": the empty slot (blank key) becomes a recipient once 제공받는 자 is filled in. Its key was
+    # never used by the agenda, so no provision given under another recipient's wording is counted for it.
+    taken = {r["key"] for r in recipients} | set(reserved_recipients)
+    for index in range(RECIPIENTS_MAX + 1):
+        prefix = f"r{index}_"
+        if form.get(f"{prefix}key") != "" or not value(f"{prefix}name").strip() or len(recipients) >= RECIPIENTS_MAX:
+            continue
+        number = len(recipients) + 1
+        while f"recipient{number}" in taken:
+            number += 1
+        taken.add(f"recipient{number}")
+        recipients.append({"key": f"recipient{number}", **{
+            name: value(prefix + name) for name in SEED_CONTENT["recipients"][0] if name != "key"
         }})
 
     privacy = {name: value(f"privacy_{name}") for name in base["privacy"] if name != "collect_access_info"}
@@ -760,6 +777,12 @@ def used_question_keys(db: Session, agenda: Agenda) -> set[str]:
     """Every question key in any published version of the agenda (active or not): never handed out again."""
     contents = db.scalars(select(ConsentVersion.content).where(ConsentVersion.agenda_id == agenda.id)).all()
     return {str(q.get("key")) for content in contents for q in (content or {}).get("questions", [])}
+
+
+def used_recipient_keys(db: Session, agenda: Agenda) -> set[str]:
+    """Every recipient key in any published version of the agenda: never handed out again."""
+    contents = db.scalars(select(ConsentVersion.content).where(ConsentVersion.agenda_id == agenda.id)).all()
+    return {str(r.get("key")) for content in contents for r in (content or {}).get("recipients", [])}
 
 
 def seed_agendas(db: Session) -> None:

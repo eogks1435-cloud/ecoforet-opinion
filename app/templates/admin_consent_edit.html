@@ -238,8 +238,28 @@
       <h2 class="panel-title">개인정보 제3자 제공</h2>
       {{ input("provision_title", "영역 제목", c.provision_title) }}
       {{ area("provision_intro", "제공 안내", c.provision_intro, rows=3) }}
-      {%- for r in c.recipients %}
-      {%- set i = loop.index0 %}
+      {%- for i, r in recipient_slots %}
+      {%- if r is none %}
+      <fieldset class="slot slot-new">
+        <legend>새 제출처 추가</legend>
+        <p class="field-help">① 제공받는 자를 적고 저장하면 제출처가 추가되고, 주민 화면에 이 제출처에 대한 제공 동의 질문이 하나 늘어납니다.
+          추가한 제출처는 지울 수 없습니다(게시 전이라면 아래 '버전 기록'의 '이 문구로 초안 되돌리기'로 되돌릴 수 있습니다).</p>
+        <input type="hidden" name="r{{ i }}_key" value="">
+        {{ input("r" ~ i ~ "_heading", "소제목", "", help="예: 다. 법률대리인에 대한 제공") }}
+        {{ input("r" ~ i ~ "_name", "① 제공받는 자", "") }}
+        {{ input("r" ~ i ~ "_short_name", "짧은 이름 (집계·파일 표시용)", "") }}
+        {{ area("r" ~ i ~ "_purpose", "② 이용 목적", "", rows=2) }}
+        {{ area("r" ~ i ~ "_items", "③ 제공 항목", provided_items, rows=2) }}
+        {{ area("r" ~ i ~ "_retention", "④ 제공받는 자의 보유·이용기간", "", rows=2) }}
+        {{ area("r" ~ i ~ "_delivery", "운영 확인: 제출 방식 (주민 화면에 표시되지 않음)", "", rows=2) }}
+        {{ area("r" ~ i ~ "_refusal", "⑤ 동의 거부권 및 거부 시 영향", "", help="위 제출처의 안내를 참고해 이 제출처 이름으로 적습니다", rows=4) }}
+        {{ input("r" ~ i ~ "_question", "선택 질문", "") }}
+        <div class="slot-row">
+          <label class="slot-half"><span>동의 선택지</span><input class="input" name="r{{ i }}_agree_label" value="동의합니다" maxlength="300" autocomplete="off"></label>
+          <label class="slot-half"><span>비동의 선택지</span><input class="input" name="r{{ i }}_disagree_label" value="동의하지 않습니다" maxlength="300" autocomplete="off"></label>
+        </div>
+      </fieldset>
+      {%- else %}
       <fieldset class="slot">
         <legend>제출처 <code>{{ r.key }}</code></legend>
         <input type="hidden" name="r{{ i }}_key" value="{{ r.key }}">
@@ -265,6 +285,7 @@
           <label class="slot-half"><span>비동의 선택지</span><input class="input" name="r{{ i }}_disagree_label" value="{{ r.disagree_label }}" maxlength="300" autocomplete="off"></label>
         </div>
       </fieldset>
+      {%- endif %}
       {%- endfor %}
       {{ input("principles_title", "제공·공개 원칙 제목", c.principles_title) }}
       {{ area("principles", "제공·공개 원칙", c.principles, rows=6) }}

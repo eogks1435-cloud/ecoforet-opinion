@@ -852,6 +852,65 @@ def test_a_question_key_is_never_handed_out_twice(admin, db):
     assert keys == ["q1", "q2", "q3", "q5"]
 
 
+def test_a_recipient_added_in_the_editor_is_asked_stored_and_listed(admin, db):
+    """'새 제출처 추가' (e.g. a legal representative): its own provision question, records and files."""
+    publish_ready(db)
+    assert post_consent(admin, unit="1101").status_code == 201  # a V1 record: two provisions only
+    fields = editor_fields(admin.get(f"/admin/consent/{CODE}/edit").text)
+    assert fields["r2_key"] == "" and "r3_key" not in fields  # one empty slot after company and district
+    blank = consent.content_hash(consent.draft_of(db, agenda_of(db)).content)
+    admin.post(f"/admin/consent/{CODE}/draft", data=fields)  # the prefilled empty slot alone adds nothing
+    assert consent.content_hash(consent.draft_of(db, agenda_of(db)).content) == blank
+    fields = editor_fields(admin.get(f"/admin/consent/{CODE}/edit").text)
+    fields.update({
+        "r2_heading": "다. 가상 법률대리인에 대한 제공", "r2_name": "가상 법률대리인", "r2_short_name": "법률대리인",
+        "r2_purpose": "가상 법률 검토", "r2_retention": "가상 보존기준", "r2_delivery": "가상 전달 방식",
+        "r2_refusal": "가상 거부 안내", "r2_question": "가상 법률대리인에게 제공하는 것에 동의하십니까?",
+    })
+    assert admin.post(f"/admin/consent/{CODE}/draft", data=fields, follow_redirects=False).status_code == 303
+    draft = consent.draft_of(db, agenda_of(db)).content
+    assert [r["key"] for r in draft["recipients"]] == ["company", "district", "recipient3"]
+    assert draft["recipients"][2]["items"] == ready_content()["recipients"][0]["items"]
+    assert consent.publish_blockers(draft) == []
+    assert consent.publish(db, agenda_of(db), None).label == V2
+
+    page = admin.get("/opinion").text
+    assert 'name="provide_recipient3"' in page and "가상 법률대리인에게 제공하는 것에 동의하십니까?" in page
+    missing = post_consent(admin, unit="1102", version_label=V2)
+    assert missing.status_code == 422 and "provide_recipient3" in missing.json()["errors"]
+    assert post_consent(admin, unit="1102", version_label=V2, provide_recipient3="AGREE").status_code == 201
+    assert post_consent(admin, unit="1103", version_label=V2, provide_recipient3="DISAGREE").status_code == 201
+    rows = {row.unit: row for row in rows_of(db)}
+    assert set(rows["1101"].provision_map()) == {"company", "district"}
+    assert {key: p.agreed for key, p in rows["1102"].provision_map().items()} == {
+        "company": True, "district": True, "recipient3": True}
+
+    listed = read_csv(admin.get(f"/admin/consent/{CODE}/recipients/recipient3.csv"))
+    assert [row[2] for row in listed[1:]] == ["1102"]  # neither the V1 record nor the one that declined
+    assert admin.get(f"/admin/consent/{CODE}/recipients/recipient3.pdf").status_code == 200
+    assert "법률대리인 제공" in read_csv(admin.get(f"/admin/consent/{CODE}/export.csv"))[0]
+    stats = {r.key: (r.agreed, r.declined, r.eligible) for r in consent.consent_stats(db, agenda_of(db)).recipients}
+    assert stats["recipient3"] == (1, 1, 1) and stats["company"] == (3, 0, 3)
+    fields = editor_fields(admin.get(f"/admin/consent/{CODE}/edit").text)
+    assert fields["r2_key"] == "recipient3" and fields["r3_key"] == ""  # a further empty slot
+
+
+def test_a_recipient_key_is_never_handed_out_twice(admin, db):
+    publish_ready(db)
+    agenda = agenda_of(db)
+    with_third = ready_content()
+    with_third["recipients"].append({**with_third["recipients"][0], "key": "recipient3", "name": "셋째 제출처"})
+    consent.save_draft(db, agenda, with_third, None)
+    assert consent.publish(db, agenda, None).label == V2
+    # Back to V1's wording (two recipients), then a new one: it must not become "recipient3" with another meaning.
+    admin.post(f"/admin/consent/{CODE}/draft/load", data={"csrf": admin_csrf(admin), "label": V1})
+    fields = editor_fields(admin.get(f"/admin/consent/{CODE}/edit").text)
+    fields.update({"r2_name": "다른 새 제출처", "r2_question": "다른 새 제출처에 제공하는 것에 동의하십니까?"})
+    admin.post(f"/admin/consent/{CODE}/draft", data=fields)
+    keys = [r["key"] for r in consent.draft_of(db, agenda_of(db)).content["recipients"]]
+    assert keys == ["company", "district", "recipient4"]
+
+
 def test_a_reworded_question_is_either_split_or_explicitly_merged(admin, db):
     publish_ready(db)
     for unit in ("2301", "2302", "2303"):

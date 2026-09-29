@@ -796,6 +796,9 @@ def _editor_context(request: Request, db: Session, agenda: Agenda, content: dict
         "section_slots": list(enumerate(content["sections"])) + [(len(content["sections"]), None)],
         "question_slots": list(enumerate(content["questions"])) + (
             [(len(content["questions"]), None)] if len(content["questions"]) < consent.QUESTIONS_MAX else []),
+        "recipient_slots": list(enumerate(content["recipients"])) + (
+            [(len(content["recipients"]), None)] if len(content["recipients"]) < consent.RECIPIENTS_MAX else []),
+        "provided_items": consent.SEED_CONTENT["recipients"][0]["items"],
     }
 
 
@@ -834,7 +837,8 @@ def consent_save_draft(code: str, request: Request, db: Session = Depends(get_db
     base = draft.content if draft else consent.SEED_CONTENT
     published = consent.current_version(db, agenda)
     content = consent.content_from_form(fields, base, consent.used_question_keys(db, agenda),
-                                        published.content if published else None)
+                                        published.content if published else None,
+                                        consent.used_recipient_keys(db, agenda))
     if not csrf_valid(request, fields.get("csrf")):
         context = _editor_context(request, db, agenda, content, message=EXPIRED_MESSAGE, stamp=fields.get("draft_stamp", ""))
         return templates.TemplateResponse(request, "admin_consent_edit.html", context, status_code=400)
