@@ -23,6 +23,24 @@
     }
   });
 
+  // Consent wording editor: come back to the part being edited after saving, warn before losing edits.
+  var draftForm = byId('draft-form');
+  if (draftForm) {
+    var dirty = false;
+    draftForm.addEventListener('input', function () { dirty = true; });
+    draftForm.addEventListener('change', function () { dirty = true; });
+    draftForm.addEventListener('focusin', function (event) {
+      var part = event.target.closest && event.target.closest('section[id]');
+      if (part) byId('editor-anchor').value = part.id;
+    });
+    draftForm.addEventListener('submit', function () { dirty = false; });
+    window.addEventListener('beforeunload', function (event) {
+      if (!dirty) return;
+      event.preventDefault();
+      event.returnValue = '';
+    });
+  }
+
   var detailModal = byId('detail-modal');
   var invalidateModal = byId('invalidate-modal');
   var invalidateForm = byId('invalidate-form');

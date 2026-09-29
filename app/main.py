@@ -1,4 +1,4 @@
-"""FastAPI app: the public opinion form (/opinion) and the password-protected admin (/admin)."""
+"""FastAPI app: the public page (/opinion: the public agenda's form) and the password-protected admin (/admin)."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from .config import BASE_DIR, settings
 from .database import init_db
-from .routes import admin, admin_document, public
+from .routes import admin, admin_consent, admin_document, public
 from .security import ADMIN_SESSION_SECONDS
 from .templating import templates
 
@@ -69,6 +69,7 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.include_router(public.router)
 app.include_router(admin_document.router)  # before admin.router: /admin/document is more specific
+app.include_router(admin_consent.router)
 app.include_router(admin.router)
 
 

@@ -19,6 +19,10 @@
 
   {{ document_article(doc) }}
 
+  {% if paused %}
+  <p class="alert paused-alert" role="status">현재 접수가 종료되었거나 일시 중지되었습니다. 내용은 확인하실 수 있습니다.</p>
+  {% endif %}
+
   <noscript>
     <p class="alert">서명 입력과 제출에는 자바스크립트가 필요합니다. 브라우저 설정에서 자바스크립트를 켠 뒤 다시 열어 주세요.</p>
   </noscript>
@@ -119,7 +123,7 @@
 
     <div class="submit-area">
       <p class="alert" id="form-alert" role="alert" hidden></p>
-      <button class="btn btn-primary btn-block" type="submit" id="submit-button" aria-describedby="submit-hint" disabled>의견서 제출하기</button>
+      <button class="btn btn-primary btn-block" type="submit" id="submit-button" aria-describedby="submit-hint" disabled{% if paused %} data-paused="1"{% endif %}>의견서 제출하기</button>
       <p class="submit-hint" id="submit-hint">제출 및 활용 동의 항목에 모두 체크하면 제출할 수 있습니다.</p>
     </div>
   </form>
@@ -146,5 +150,6 @@
 
 {% block scripts %}
 <script src="{{ static_url('js/modal.js') }}" defer></script>
+<script src="{{ static_url('js/signature-pad.js') }}" defer></script>
 <script src="{{ static_url('js/opinion.js') }}" defer></script>
 {% endblock %}

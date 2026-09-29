@@ -47,14 +47,19 @@ def get_db() -> Iterator[Session]:
         db.close()
 
 
-def init_db() -> None:
-    """Create missing tables and seed the first document version.
+def init_db(bind: Engine | None = None) -> None:
+    """Create missing tables and seed the first document version and the agendas.
 
-    Existing tables and data are never dropped or altered.
+    Additive only: existing tables, columns and rows are never dropped, altered or rewritten. On a database
+    that predates agendas this adds the agenda/consent tables, registers the existing opinion form as the
+    public legacy agenda and creates the new consent agenda as an unpublished draft.
     """
     from . import models  # noqa: F401  (registers the tables on Base.metadata)
+    from .consent import seed_agendas
     from .document import seed_initial_document
 
-    Base.metadata.create_all(bind=engine, checkfirst=True)
-    with SessionLocal() as db:
+    bind = bind or engine
+    Base.metadata.create_all(bind=bind, checkfirst=True)
+    with sessionmaker(bind=bind, autoflush=False, expire_on_commit=False)() as db:
         seed_initial_document(db)
+        seed_agendas(db)

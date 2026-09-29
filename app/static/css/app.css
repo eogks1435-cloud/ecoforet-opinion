@@ -365,3 +365,66 @@ legend.section-title + * { clear: both; }
   .doc-title { font-size: 28px; }
   .document { padding: 30px 32px; }
 }
+
+/* ------------------------------------------------------------------ online consent form */
+.preview-banner {
+  padding: 10px 16px;
+  background: #fff4d6;
+  border-bottom: 1px solid #efd9a3;
+  color: #5c4510;
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+}
+.consent-head .apt-name { font-size: 16px; font-weight: 600; color: var(--muted); }
+.consent-head .doc-title { margin-top: 6px; }
+.doc-subtitle { display: block; margin-top: 4px; font-size: 0.8em; }
+.addressing { display: inline-block; margin-top: 14px; text-align: left; font-size: 16px; }
+.addressing div { display: flex; }
+.addressing dt { flex: none; width: 3em; font-weight: 700; }
+.addressing dd { flex: 1 1 auto; min-width: 0; }
+.info-alert { border-color: #c7d6ef; background: var(--accent-soft); color: var(--accent); margin: 0 0 14px; }
+.paused-alert { margin: 0 0 14px; }
+.consent-doc .doc-h2 { margin: 22px 0 10px; font-size: 19px; line-height: 1.45; }
+.consent-doc .doc-h2:first-child { margin-top: 0; }
+.consent-doc .doc-h3 { margin: 18px 0 8px; font-size: 17px; line-height: 1.5; }
+.consent-doc p + p { margin-top: 10px; }
+.section-intro p + p, .notes p + p, .consent-privacy p + p, .recipient p + p { margin-top: 8px; }
+.section-intro { margin-top: 8px; }
+.question {
+  margin: 18px 0 0;
+  padding: 16px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  min-width: 0;
+}
+.question-title { float: left; width: 100%; padding: 0; font-size: 17px; font-weight: 700; line-height: 1.5; }
+.question-title + * { clear: both; }
+.question-text { margin-top: 6px; }
+.choice-pair { display: flex; flex-wrap: wrap; margin: 6px -5px 0; }
+.choice-pair .choice { flex: 1 1 140px; margin: 6px 5px 0; }
+.choice-pair .choice-box { min-height: 56px; padding: 10px 12px; }
+.has-error.question { border-color: var(--danger); }
+.sub-title { margin: 20px 0 8px; font-size: 17px; line-height: 1.5; }
+.info-label { margin-top: 12px; font-weight: 700; }
+.info-list { margin: 8px 0 0; }
+.info-list div { padding: 8px 0; border-bottom: 1px solid #eceef1; }
+.info-list dt { font-weight: 700; }
+.info-list dd { margin: 2px 0 0; }
+.participant-target { margin-top: 10px; padding: 12px 14px; border-radius: 8px; background: #f8f9fa; }
+.participant-target .info-label { margin-top: 0; }
+.field-hint { margin-top: 6px; font-size: 15px; color: var(--muted); }
+.notes { margin-top: 22px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: #f8f9fa; font-size: 16px; }
+.notes-title { margin-bottom: 8px; font-size: 16px; }
+.recipient { margin-top: 18px; padding-top: 4px; border-top: 1px dashed var(--line); }
+.recipient:first-of-type { border-top: 0; }
+.footer-note { margin-top: 14px; font-size: 15px; color: var(--muted); }
+.missing { padding: 1px 6px; border-radius: 4px; background: #fdecea; color: var(--danger); font-weight: 700; }
+.summary-answers { margin: 10px 0 0; padding: 0; list-style: none; font-size: 15px; }
+.summary-answers li { display: flex; justify-content: space-between; padding: 5px 0; border-top: 1px solid #eceef1; }
+.summary-answers li span { padding-right: 10px; }
+.summary-answers li strong { flex: none; }
+.preview-banner p { max-width: 720px; margin: 0 auto; }
+.preview-banner .preview-meta { margin-top: 4px; font-size: 13px; font-weight: 400; word-break: break-all; }
+.preview-banner a { color: inherit; }

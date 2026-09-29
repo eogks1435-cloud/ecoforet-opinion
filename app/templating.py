@@ -30,3 +30,12 @@ def static_url(path: str) -> str:
 
 templates.env.filters["kst"] = format_kst
 templates.env.globals["static_url"] = static_url
+
+
+def _rich_blocks(text: str):
+    from .consent import rich_blocks  # imported late: consent imports the models
+
+    return rich_blocks(text)
+
+
+templates.env.globals["rich_blocks"] = _rich_blocks

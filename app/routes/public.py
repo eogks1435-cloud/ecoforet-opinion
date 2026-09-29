@@ -13,10 +13,18 @@ from sqlalchemy import exists, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from .. import document
+from .. import consent, document
 from ..config import settings
 from ..database import get_db
-from ..models import STATUS_ACTIVE, OpinionSubmission
+from ..models import (
+    AGENDA_CONSENT,
+    AGENDA_LEGACY,
+    STATUS_ACTIVE,
+    ConsentAnswer,
+    ConsentProvision,
+    ConsentSubmission,
+    OpinionSubmission,
+)
 from ..schemas import COMMENT_MAX, NAME_MAX, FormErrors, validate_submission
 from ..security import client_ip, same_origin
 from ..templating import format_kst, templates
@@ -25,11 +33,18 @@ router = APIRouter()
 logger = logging.getLogger("opinion")
 
 DUPLICATE_MESSAGE = "이미 해당 동·호수로 제출된 의견서가 있습니다."
+CONSENT_DUPLICATE_MESSAGE = "이미 해당 동·호수로 제출된 온라인 동의서가 있습니다."
 TEMPORARY_FAILURE_MESSAGE = "일시적으로 제출하지 못했습니다. 잠시 후 다시 시도해 주세요."
 BAD_REQUEST_MESSAGE = "잘못된 요청입니다. 페이지를 새로고침한 후 다시 시도해 주세요."
 DOCUMENT_CHANGED_MESSAGE = (
     "작성하시는 동안 의견서 내용이 변경되었습니다. 페이지를 새로고침하여 변경된 내용을 확인한 뒤 다시 작성해 주세요."
 )
+CONSENT_CHANGED_MESSAGE = (
+    "작성하시는 동안 동의서 문구가 변경되었습니다. 새로고침하여 변경된 내용을 확인하고, 각 질문의 답변과 서명을 "
+    "다시 입력해 주세요. 입력하신 동·호수와 성명은 유지됩니다."
+)
+AGENDA_CHANGED_MESSAGE = "접수 중인 안건이 변경되었습니다. 페이지를 새로고침하여 현재 안건을 확인해 주세요."
+PAUSED_MESSAGE = "현재 접수가 일시 중지되었습니다. 안내에 따라 나중에 다시 제출해 주세요."
 RECEIPT_MAX_AGE = 30 * 24 * 3600
 
 # The completion page only shows what this signed receipt says, so its URL cannot be forged.
@@ -67,8 +82,31 @@ def root() -> RedirectResponse:
     return RedirectResponse("/opinion", status_code=302)
 
 
+def consent_page_context(content: dict, *, agenda_code: str, version_label: str, accepting: bool,
+                         preview: str = "") -> dict:
+    """Template context for the consent form (live page, admin draft preview or a stored version)."""
+    return {
+        "c": content,
+        "questions": consent.active_questions(content),
+        "generated_items": consent.generated_items(content),
+        "agenda_code": agenda_code,
+        "version_label": version_label,
+        "accepting": accepting,
+        "preview": preview,
+        "name_max": NAME_MAX,
+    }
+
+
 @router.api_route("/opinion", methods=["GET", "HEAD"])
 def opinion_form(request: Request, db: Session = Depends(get_db)):
+    agenda = consent.public_agenda(db)
+    if agenda is not None and agenda.kind == AGENDA_CONSENT:
+        version = consent.current_version(db, agenda)
+        if version is not None:
+            context = consent_page_context(
+                version.content, agenda_code=agenda.code, version_label=version.label, accepting=agenda.accepting
+            )
+            return templates.TemplateResponse(request, "consent.html", context, headers={"Cache-Control": "no-cache"})
     current = document.active_document(db)
     if current is None:  # only before the first start has seeded the table
         return PlainTextResponse("의견서를 준비하고 있습니다. 잠시 후 다시 접속해 주세요.", status_code=503)
@@ -82,6 +120,7 @@ def opinion_form(request: Request, db: Session = Depends(get_db)):
         "usage_consent_text": document.USAGE_CONSENT_TEXT,
         "comment_max": COMMENT_MAX,
         "name_max": NAME_MAX,
+        "paused": agenda is not None and not agenda.accepting,
     }
     return templates.TemplateResponse(request, "opinion.html", context, headers={"Cache-Control": "no-cache"})
 
@@ -104,6 +143,17 @@ def submit_opinion(
     # The page posts with fetch and this header; a cross-site form cannot add it without a CORS preflight.
     if request.headers.get("x-requested-with") != "fetch" or not same_origin(request):
         return _json(403, ok=False, code="forbidden", message=BAD_REQUEST_MESSAGE)
+    try:
+        # The single-choice form is accepted only while its (legacy) agenda is the public, open one.
+        agenda = consent.public_agenda(db)
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception("agenda lookup failed")
+        return _temporary_failure()
+    if agenda is not None and agenda.kind != AGENDA_LEGACY:
+        return _json(409, ok=False, code="document_changed", message=AGENDA_CHANGED_MESSAGE)
+    if agenda is not None and not agenda.accepting:
+        return _json(423, ok=False, code="paused", message=PAUSED_MESSAGE)
 
     try:
         data = validate_submission(
@@ -170,6 +220,119 @@ def submit_opinion(
     return _json(201, ok=True, redirect=f"/opinion/complete?r={token}")
 
 
+async def _form_fields(request: Request) -> dict[str, str]:
+    """All text fields of a form post (the consent form's field names depend on its questions)."""
+    form = await request.form()
+    return {key: value for key, value in form.items() if isinstance(value, str)}
+
+
+def _consent_receipt(submission: ConsentSubmission) -> JSONResponse:
+    token = _receipts.dumps({"n": submission.receipt_no, "t": submission.submitted_at.isoformat(), "k": "consent"})
+    return _json(201, ok=True, redirect=f"/opinion/complete?r={token}")
+
+
+def _replay(db: Session, data: consent.ConsentInput, version_label: str) -> JSONResponse | None:
+    """A retry of a request that was already stored returns the first result instead of a second record."""
+    if not data.client_token:
+        return None
+    earlier = db.scalar(select(ConsentSubmission).where(ConsentSubmission.client_token == data.client_token))
+    if earlier is None:
+        return None
+    if earlier.request_hash == data.request_hash(version_label):
+        return _consent_receipt(earlier)
+    return _json(
+        409, ok=False, code="already_submitted",
+        message=f"이 화면에서 이미 제출된 동의서가 있습니다(제출번호 {earlier.receipt_no}). "
+                "정정이 필요하면 안내된 연락처로 요청해 주세요.",
+    )
+
+
+@router.post("/opinion/consent")
+def submit_consent(
+    request: Request,
+    db: Session = Depends(get_db),
+    fields: dict[str, str] = Depends(_form_fields),
+) -> JSONResponse:
+    received_at = datetime.now(timezone.utc)
+    if request.headers.get("x-requested-with") != "fetch" or not same_origin(request):
+        return _json(403, ok=False, code="forbidden", message=BAD_REQUEST_MESSAGE)
+    try:
+        agenda = consent.agenda_by_code(db, fields.get("agenda_code", ""))
+        if agenda is None or agenda.kind != AGENDA_CONSENT or not agenda.is_public:
+            return _json(409, ok=False, code="document_changed", message=AGENDA_CHANGED_MESSAGE)
+        if not agenda.accepting:
+            return _json(423, ok=False, code="paused", message=PAUSED_MESSAGE)
+        version = consent.current_version(db, agenda)
+        # A signature only counts for the wording the resident actually read.
+        if version is None or fields.get("version_label") != version.label:
+            return _json(409, ok=False, code="document_changed", message=CONSENT_CHANGED_MESSAGE)
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception("consent agenda lookup failed")
+        return _temporary_failure()
+
+    try:
+        data = consent.validate_consent(fields, version.content)
+    except FormErrors as exc:
+        return _json(422, ok=False, code="invalid", message="입력 내용을 확인해 주세요.", errors=exc.errors)
+
+    collect_access = bool(version.content["privacy"].get("collect_access_info"))
+    try:
+        replay = _replay(db, data, version.label)
+        if replay is not None:
+            return replay
+        if consent.active_submission_exists(db, agenda.id, data.building, data.unit):
+            return _json(409, ok=False, code="duplicate", message=CONSENT_DUPLICATE_MESSAGE,
+                         errors={"residence": CONSENT_DUPLICATE_MESSAGE})
+        submission = ConsentSubmission(
+            public_id=uuid.uuid4(),
+            agenda_id=agenda.id,
+            version_id=version.id,
+            version_label=version.label,
+            content_hash=version.content_hash,
+            building=data.building,
+            unit=data.unit,
+            resident_name=data.resident_name,
+            signature_data=data.signature_png,
+            privacy_consent=True,
+            final_confirmed=True,
+            client_token=data.client_token,
+            request_hash=data.request_hash(version.label),
+            access_info_collected=collect_access,
+            ip_address=client_ip(request) if collect_access else None,
+            user_agent=((request.headers.get("user-agent") or "")[:512] or None) if collect_access else None,
+            submitted_at=received_at,
+            status=STATUS_ACTIVE,
+        )
+        submission.answers = [ConsentAnswer(question_key=k, answer=v) for k, v in data.answers.items()]
+        submission.provisions = [ConsentProvision(recipient_key=k, agreed=v) for k, v in data.provisions.items()]
+        db.add(submission)
+        db.commit()  # success is reported only after the submission and its answers are committed together
+    except IntegrityError:
+        # Same unit or same retried request at the same moment: the unique indexes keep only one record.
+        db.rollback()
+        try:
+            replay = _replay(db, data, version.label)
+            if replay is not None:
+                return replay
+            duplicate = consent.active_submission_exists(db, agenda.id, data.building, data.unit)
+        except SQLAlchemyError:
+            db.rollback()
+            duplicate = False
+        if duplicate:
+            return _json(409, ok=False, code="duplicate", message=CONSENT_DUPLICATE_MESSAGE,
+                         errors={"residence": CONSENT_DUPLICATE_MESSAGE})
+        logger.exception("consent insert rejected by a database constraint")
+        return _temporary_failure()
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception("consent insert failed")
+        return _temporary_failure()
+
+    logger.info("consent submission stored receipt=%s version=%s", submission.receipt_no, submission.version_label)
+    return _consent_receipt(submission)
+
+
 @router.get("/opinion/complete")
 def opinion_complete(request: Request, r: str = ""):
     try:
@@ -178,7 +341,11 @@ def opinion_complete(request: Request, r: str = ""):
         submitted_at = datetime.fromisoformat(str(receipt["t"]))
     except (BadData, KeyError, TypeError, ValueError):
         return RedirectResponse("/opinion", status_code=303)
-    context = {"receipt_no": receipt_no, "submitted_at": format_kst(submitted_at)}
+    context = {
+        "receipt_no": receipt_no,
+        "submitted_at": format_kst(submitted_at),
+        "kind": "consent" if receipt.get("k") == "consent" else "opinion",
+    }
     return templates.TemplateResponse(request, "success.html", context, headers={"Cache-Control": "no-store"})
 
 

@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+{% from "_consent.html" import rich, setting, choice_pair %}
+{% set p = c.privacy %}
+{% set hints = c.field_hints %}
+
+{% block title %}{{ c.title }} {{ c.subtitle }}{% endblock %}
+{% block meta %}
+<meta name="description" content="{{ c.apartment_name }} {{ c.title }} {{ c.subtitle }}">
+<meta property="og:type" content="website">
+<meta property="og:title" content="{{ c.title }} {{ c.subtitle }}">
+<meta property="og:description" content="{{ c.apartment_name }}">
+{% endblock %}
+
+{% block body %}
+{% if preview %}
+<div class="preview-banner" role="note">
+  {% if preview == "version" %}
+  <p><strong>게시 버전 {{ version_label }} 원문</strong> · 이 화면에서는 제출할 수 없습니다.</p>
+  {% if version_meta %}
+  <p class="preview-meta">게시 {{ version_meta.created }} (한국시간) · 본문 확인값 SHA-256 {{ version_meta.hash }} ({{ version_meta.scheme }})
+    · {% if version_meta.hash_ok %}저장된 원문과 확인값 일치{% else %}<strong>저장된 원문과 확인값 불일치</strong>{% endif %}</p>
+  {% endif %}
+  {% else %}
+  <p><strong>미리보기 (저장된 초안)</strong> · 주민에게 공개되지 않은 화면입니다. 이 화면에서는 제출할 수 없습니다.</p>
+  {% if blockers %}
+  <p class="preview-meta">게시 전 확인 항목 {{ blockers|length }}개가 남아 있어 게시할 수 없습니다. 빨간 [게시 전 입력] 표시를 확인하세요.</p>
+  {% else %}
+  <p class="preview-meta">게시 전 입력 항목이 모두 채워졌습니다.</p>
+  {% endif %}
+  {% endif %}
+  <p class="preview-meta"><a href="/admin/consent/{{ agenda_code }}/edit">편집 화면으로</a></p>
+</div>
+{% endif %}
+<main class="page consent-page">
+  <header class="page-head consent-head">
+    {% if c.apartment_name %}<p class="apt-name">{{ c.apartment_name }}</p>{% endif %}
+    <h1 class="doc-title">{{ c.title }}{% if c.subtitle %}<span class="doc-subtitle">{{ c.subtitle }}</span>{% endif %}</h1>
+    {% if c.recipient_line or c.cc_line %}
+    <dl class="addressing">
+      {% if c.recipient_line %}<div><dt>수신</dt><dd>{{ c.recipient_line }}</dd></div>{% endif %}
+      {% if c.cc_line %}<div><dt>참조</dt><dd>{{ c.cc_line }}</dd></div>{% endif %}
+    </dl>
+    {% endif %}
+    {% if c.intro %}<div class="lead">{{ rich(c.intro) }}</div>{% endif %}
+  </header>
+
+  {% if not accepting and not preview %}
+  <p class="alert paused-alert" role="status">현재 온라인 동의 접수가 일시 중지되었습니다. 내용은 확인하실 수 있습니다.</p>
+  {% endif %}
+
+  <p class="alert info-alert" id="top-alert" role="status" hidden></p>
+
+  <article class="document consent-doc" aria-label="동의서 본문">
+    {%- for s in c.sections %}
+    {% if s.level == 1 %}<h2 class="doc-h2">{{ s.title }}</h2>{% else %}<h3 class="doc-h3">{{ s.title }}</h3>{% endif %}
+    {{ rich(s.body) }}
+    {%- endfor %}
+  </article>
+
+  <form id="consent-form" class="form" action="/opinion/consent" method="post" novalidate
+        data-preview="{{ '1' if preview else '0' }}" data-accepting="{{ '1' if accepting else '0' }}">
+    <input type="hidden" name="agenda_code" value="{{ agenda_code }}">
+    <input type="hidden" name="version_label" value="{{ version_label }}">
+    <input type="hidden" name="client_token" id="client-token" value="">
+    <input type="hidden" name="signature" id="signature-data">
+
+    <section class="section">
+      <h2 class="section-title">{{ c.questions_title }}</h2>
+      <div class="section-intro">{{ rich(c.questions_intro) }}</div>
+      {%- for q in questions %}
+      <fieldset class="question" data-field="answer_{{ q.key }}" data-summary="질문 {{ loop.index }}. {{ q.title }}">
+        <legend class="question-title">질문 {{ loop.index }}. {{ q.title }}</legend>
+        <div class="question-text">{{ rich(q.text) }}</div>
+        {{ choice_pair("answer_" ~ q.key, q.agree_label, q.disagree_label) }}
+      </fieldset>
+      {%- endfor %}
+    </section>
+
+    <section class="section" aria-labelledby="participant-title">
+      <h2 class="section-title" id="participant-title">{{ c.participant_title }}</h2>
+      <div class="participant-target"><p class="info-label">참여 대상</p>{{ setting(c.participant_target, "참여 대상과 동일 세대의 참여 기준", preview) }}</div>
+      <div class="field-group" data-field="residence">
+        <div class="row-2">
+          <div class="field">
+            <label class="field-label" for="building">동</label>
+            <div class="affix">
+              <input class="input" id="building" name="building" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="10" autocomplete="off" enterkeyhint="next" placeholder="예: 101" aria-describedby="error-residence">
+              <span class="affix-unit" aria-hidden="true">동</span>
+            </div>
+          </div>
+          <div class="field">
+            <label class="field-label" for="unit">호수</label>
+            <div class="affix">
+              <input class="input" id="unit" name="unit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="10" autocomplete="off" enterkeyhint="next" placeholder="예: 1203" aria-describedby="error-residence">
+              <span class="affix-unit" aria-hidden="true">호</span>
+            </div>
+          </div>
+        </div>
+        {% if hints.building or hints.unit %}<p class="field-hint">{{ hints.building }} {{ hints.unit }}</p>{% endif %}
+        <p class="field-error" id="error-residence" hidden></p>
+      </div>
+      <div class="field" data-field="resident_name">
+        <label class="field-label" for="resident_name">성명</label>
+        <input class="input" id="resident_name" name="resident_name" type="text" maxlength="{{ name_max }}" autocomplete="name" enterkeyhint="done" placeholder="예: 홍길동" aria-describedby="error-resident_name">
+        {% if hints.name %}<p class="field-hint">{{ hints.name }}</p>{% endif %}
+        <p class="field-error" id="error-resident_name" hidden></p>
+      </div>
+      <div class="field" data-field="signature">
+        <p class="field-label">서명</p>
+        <div class="sig-wrap">
+          <div class="sig-box" id="signature-box">
+            <span class="sig-line" aria-hidden="true"></span>
+            <span class="sig-hint" aria-hidden="true">이곳에 서명</span>
+            <canvas class="sig-canvas" id="signature-pad" role="img" aria-label="서명 입력 영역"></canvas>
+          </div>
+        </div>
+        <div class="sig-foot">
+          <p class="sig-help">{{ hints.signature or "위 영역에 손가락 또는 마우스로 직접 서명해 주세요." }}</p>
+          <button class="btn btn-ghost" type="button" id="signature-clear">다시 쓰기</button>
+        </div>
+        <p class="field-error" id="error-signature" hidden></p>
+      </div>
+      <div class="notes">
+        <h3 class="notes-title">{{ c.participation_notes_title }}</h3>
+        {{ rich(c.participation_notes) }}
+      </div>
+    </section>
+
+    <section class="section consent-privacy" aria-labelledby="privacy-title">
+      <h2 class="section-title" id="privacy-title">{{ p.title }}</h2>
+      <h3 class="sub-title">① 개인정보 수집·관리 주체 및 연락처</h3>
+      <dl class="info-list">
+        <div><dt>수집·관리 주체</dt><dd>{{ setting(p.controller, "실제 운영 주체의 명칭", preview) }}</dd></div>
+        <div><dt>개인정보 관리책임자</dt><dd>{{ setting(p.officer, "책임자 성명", preview) }}</dd></div>
+        <div><dt>문의·열람·정정·철회 요청 연락처</dt><dd>{{ setting(p.contact, "전화번호 또는 이메일", preview) }}</dd></div>
+      </dl>
+      <h3 class="sub-title">② 수집·이용 목적</h3>
+      {{ rich(p.purpose) }}
+      <h3 class="sub-title">③ 수집 항목</h3>
+      <p><strong>참여자가 입력하거나 선택하는 정보:</strong><br>{{ p.items_input }}</p>
+      <p><strong>제출 과정에서 생성·수집되는 정보:</strong><br>{{ generated_items }}</p>
+      <h3 class="sub-title">④ 보유·이용기간</h3>
+      <dl class="info-list">
+        <div><dt>동의자료</dt><dd>{{ setting(p.retention_records, "실제 보유기간 또는 명확한 종료 기준", preview) }}</dd></div>
+        {% if p.collect_access_info %}
+        <div><dt>접속 IP 주소 및 브라우저 정보</dt><dd>{{ setting(p.retention_access, "보안 목적에 필요한 실제 보유기간", preview) }}</dd></div>
+        {% endif %}
+      </dl>
+      {{ rich(p.retention_notes) }}
+      {% if p.storage_location or preview %}
+      <h3 class="sub-title">개인정보 저장 위치</h3>
+      {{ setting(p.storage_location, "서버 소재지·국외 이전 여부 안내", preview) }}
+      {% endif %}
+      <h3 class="sub-title">⑤ 동의 거부권 및 거부 시 영향</h3>
+      {{ rich(p.refusal) }}
+      <fieldset class="question" data-field="privacy_consent" data-summary="개인정보 수집·이용">
+        <legend class="question-title">{{ p.question }}</legend>
+        {{ choice_pair("privacy_consent", p.agree_label, p.disagree_label) }}
+      </fieldset>
+    </section>
+
+    <section class="section" aria-labelledby="provision-title">
+      <h2 class="section-title" id="provision-title">{{ c.provision_title }}</h2>
+      <div class="section-intro">{{ rich(c.provision_intro) }}</div>
+      {%- for r in c.recipients %}
+      <div class="recipient">
+        <h3 class="sub-title">{{ r.heading }}</h3>
+        <dl class="info-list">
+          <div><dt>① 제공받는 자</dt><dd>{{ rich(r.name) }}</dd></div>
+          <div><dt>② 이용 목적</dt><dd>{{ rich(r.purpose) }}</dd></div>
+          <div><dt>③ 제공 항목</dt><dd>{{ rich(r['items']) }}</dd></div>
+          <div><dt>④ 제공받는 자의 보유·이용기간</dt><dd>{{ setting(r.retention, r.short_name ~ "에 확인한 보유기간 또는 보존기준", preview) }}</dd></div>
+        </dl>
+        <p class="info-label">⑤ 동의 거부권 및 거부 시 영향</p>
+        {{ rich(r.refusal) }}
+        <fieldset class="question" data-field="provide_{{ r.key }}" data-summary="{{ r.short_name or r.name }} 제공">
+          <legend class="question-title">{{ r.question }}</legend>
+          {{ choice_pair("provide_" ~ r.key, r.agree_label, r.disagree_label) }}
+        </fieldset>
+      </div>
+      {%- endfor %}
+      <div class="notes">
+        <h3 class="notes-title">{{ c.principles_title }}</h3>
+        {{ rich(c.principles) }}
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="final-title">
+      <h2 class="section-title" id="final-title">{{ c.final_title }}</h2>
+      {{ rich(c.final_statements) }}
+      <div class="check-item" data-field="final_confirmed">
+        <label class="check">
+          <input class="check-input" type="checkbox" id="final_confirmed" name="final_confirmed" value="on" aria-describedby="error-final_confirmed">
+          <span class="check-box"><span class="check-mark" aria-hidden="true"></span><span class="check-text">{{ c.final_checkbox }}</span></span>
+        </label>
+        <p class="field-error" id="error-final_confirmed" hidden></p>
+      </div>
+      {% if c.footer_note %}<p class="footer-note">{{ c.footer_note }}</p>{% endif %}
+    </section>
+
+    <div class="submit-area">
+      <p class="alert" id="form-alert" role="alert" hidden></p>
+      <button class="btn btn-primary btn-block" type="submit" id="submit-button"{% if preview or not accepting %} disabled{% endif %}>온라인 동의서 제출하기</button>
+      {% if preview %}<p class="submit-hint">미리보기에서는 제출할 수 없습니다.</p>
+      {% elif not accepting %}<p class="submit-hint">현재 접수가 일시 중지되었습니다.</p>{% endif %}
+    </div>
+  </form>
+</main>
+
+<div class="modal" id="confirm-modal" hidden>
+  <div class="modal-backdrop" data-modal-close></div>
+  <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="confirm-title" tabindex="-1">
+    <h2 class="modal-title" id="confirm-title">입력하신 내용으로 온라인 동의서를 제출하시겠습니까?</h2>
+    <div class="summary">
+      <p class="summary-unit" id="summary-unit"></p>
+      <p id="summary-name"></p>
+      <ul class="summary-answers" id="summary-answers"></ul>
+      <img class="summary-signature" id="summary-signature" alt="입력한 서명">
+    </div>
+    <p class="alert" id="confirm-alert" role="alert" hidden></p>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" type="button" id="confirm-cancel" data-modal-close>취소</button>
+      <button class="btn btn-primary" type="button" id="confirm-submit">최종 제출</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ static_url('js/modal.js') }}" defer></script>
+<script src="{{ static_url('js/signature-pad.js') }}" defer></script>
+<script src="{{ static_url('js/consent.js') }}" defer></script>
+{% endblock %}

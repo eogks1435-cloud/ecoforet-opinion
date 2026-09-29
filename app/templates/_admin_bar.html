@@ -1,9 +1,12 @@
-{#- Top bar shared by the admin pages; `active` is "submissions" or "document". -#}
+{#- Top bar shared by the admin pages; `active` names the current menu. -#}
 <header class="admin-bar">
-  <p class="admin-brand">주민의견서 관리자</p>
+  <p class="admin-brand">주민 동의·의견 관리자</p>
   <nav class="admin-nav" aria-label="관리자 메뉴">
-    <a href="/admin"{% if active == "submissions" %} aria-current="page"{% endif %}>제출 현황</a>
-    <a href="/admin/document"{% if active == "document" %} aria-current="page"{% endif %}>의견서 문구</a>
+    <a href="/admin/agendas"{% if active == "agendas" %} aria-current="page"{% endif %}>안건 목록</a>
+    <a href="/admin/consent"{% if active == "consent" %} aria-current="page"{% endif %}>온라인 동의서</a>
+    <a href="/admin/consent/edit"{% if active == "consent_edit" %} aria-current="page"{% endif %}>동의서 문구</a>
+    <a href="/admin"{% if active == "submissions" %} aria-current="page"{% endif %}>기존 의견서</a>
+    <a href="/admin/document"{% if active == "document" %} aria-current="page"{% endif %}>기존 의견서 문구</a>
   </nav>
   <form class="admin-logout" method="post" action="/admin/logout">
     <input type="hidden" name="csrf" value="{{ csrf_token }}">

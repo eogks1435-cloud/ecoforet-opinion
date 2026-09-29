@@ -47,10 +47,20 @@ from fastapi.testclient import TestClient  # noqa: E402
 from PIL import Image, ImageDraw  # noqa: E402
 from sqlalchemy import delete  # noqa: E402
 
+from app.consent import seed_agendas  # noqa: E402
 from app.database import Base, SessionLocal, engine  # noqa: E402
 from app.document import SEED_VERSION, seed_initial_document  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import OpinionDocument, OpinionSubmission  # noqa: E402
+from app.models import (  # noqa: E402
+    Agenda,
+    ConsentAnswer,
+    ConsentDraft,
+    ConsentProvision,
+    ConsentSubmission,
+    ConsentVersion,
+    OpinionDocument,
+    OpinionSubmission,
+)
 from app.security import login_throttle  # noqa: E402
 
 FETCH_HEADERS = {
@@ -103,12 +113,15 @@ def _schema():
 
 @pytest.fixture(autouse=True)
 def _clean():
-    """Every test starts with no submissions and only the seeded first document version."""
+    """Every test starts with no submissions, the seeded first document version and the seeded agendas
+    (legacy agenda public, the consent agenda an unpublished draft)."""
     with SessionLocal() as session:
-        session.execute(delete(OpinionSubmission))
-        session.execute(delete(OpinionDocument))
+        for table in (ConsentAnswer, ConsentProvision, ConsentSubmission, ConsentVersion, ConsentDraft, Agenda,
+                      OpinionSubmission, OpinionDocument):
+            session.execute(delete(table))
         session.commit()
         seed_initial_document(session)
+        seed_agendas(session)
     login_throttle._failures.clear()
     yield
 

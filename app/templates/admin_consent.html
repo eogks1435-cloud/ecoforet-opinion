@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% block title %}온라인 동의서 현황 · 관리자{% endblock %}
+{% block styles %}
+<link rel="stylesheet" href="{{ static_url('css/admin.css') }}">
+{% endblock %}
+{% block body_class %}admin{% endblock %}
+
+{% block body %}
+{% include "_admin_bar.html" %}
+
+<main class="admin-main">
+  <p class="back-link"><a class="text-link" href="/admin/agendas">← 안건 목록</a></p>
+  <h1 class="page-title">{{ agenda.name }}</h1>
+  <p class="agenda-meta">
+    <code>{{ agenda.code }}</code>
+    · {% if agenda.is_public %}<span class="tag tag-agree">주민 페이지 공개 중</span>{% else %}<span class="tag tag-muted">비공개</span>{% endif %}
+    {% if agenda.accepting %}<span class="tag tag-agree">접수 가능</span>{% else %}<span class="tag tag-disagree">접수 중지</span>{% endif %}
+    · 게시 버전 {% if version %}<a class="text-link" href="/admin/consent/{{ agenda.code }}/versions/{{ version.label }}">{{ version.label }}</a>{% else %}없음{% endif %}
+  </p>
+  {% if flash %}
+  <p class="flash flash-{{ flash.kind }}" role="status">{{ flash.text }}</p>
+  {% endif %}
+
+  <section class="panel" aria-labelledby="stats-title">
+    <h2 class="panel-title" id="stats-title">내부 접수 집계</h2>
+    <div class="stats">
+      <div class="stat"><p class="stat-label">유효 제출</p><p class="stat-value">{{ stats.active }}건</p></div>
+      <div class="stat"><p class="stat-label">무효 처리</p><p class="stat-value">{{ stats.invalidated }}건</p></div>
+      <div class="stat"><p class="stat-label">철회</p><p class="stat-value">{{ stats.withdrawn }}건</p></div>
+    </div>
+    <p class="stats-note">유효 제출만 집계합니다. 무효·철회 기록은 삭제하지 않고 목록에 남기되 집계와 제출처 자료에서 제외합니다.</p>
+
+    <h3 class="sub-heading">질문별 동의 현황 (유효 제출 기준)</h3>
+    <div class="table-wrap">
+      <table class="table table-counts">
+        <thead><tr><th scope="col">질문</th><th scope="col">동의</th><th scope="col">동의하지 않음</th></tr></thead>
+        <tbody>
+        {%- for q in stats.questions %}
+          <tr{% if not q.active %} class="is-invalid"{% endif %}>
+            <td>{{ q.title }}</td><td class="num">{{ q.agree }}</td><td class="num">{{ q.disagree }}</td>
+          </tr>
+        {%- else %}
+          <tr><td class="empty" colspan="3">게시된 질문이 없습니다.</td></tr>
+        {%- endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="stats-note">
+      질문별 인원은 서로 더하지 않습니다. 한 세대가 여러 질문에 동의할 수 있으므로 합계는 '전체 동의 세대수'가 아닙니다.
+      답변 유형: 답변한 모든 질문에 동의 {{ stats.all_agree }}건 · 일부 질문만 동의 {{ stats.some_agree }}건 ·
+      모든 질문에 동의하지 않음 {{ stats.none_agree }}건(어느 요청의 동의자로도 집계하지 않음).
+    </p>
+    {% if stats.by_version|length > 1 %}
+    <p class="stats-note">버전별 유효 제출: {% for label, count in stats.by_version %}{{ label }} {{ count }}건{% if not loop.last %} · {% endif %}{% endfor %}</p>
+    {% endif %}
+  </section>
+
+  <section class="panel" aria-labelledby="named-title">
+    <h2 class="panel-title" id="named-title">제출처별 기명 동의자 수</h2>
+    <p class="panel-help">해당 질문에 동의했고 그 제출처에 대한 개인정보 제공에도 동의한 유효 기록만 그 제출처의 해당 질문 기명 동의자로 셉니다(제공 동의 철회 시 제외).</p>
+    <div class="table-wrap">
+      <table class="table table-cards">
+        <thead>
+          <tr>
+            <th scope="col">제출처</th><th scope="col">제공 동의</th><th scope="col">동의하지 않음</th><th scope="col">철회</th>
+            {%- for q in stats.questions if q.active %}<th scope="col">질문 {{ loop.index }} 기명 동의자</th>{% endfor %}
+            <th scope="col">제출 파일 인원</th><th scope="col"><span class="sr-only">내려받기</span></th>
+          </tr>
+        </thead>
+        <tbody>
+        {%- for r in stats.recipients %}
+          <tr>
+            <th scope="row" class="card-head">{{ r.short_name }}</th>
+            <td class="num" data-label="제공 동의">{{ r.agreed }}</td><td class="num" data-label="동의 안 함">{{ r.declined }}</td><td class="num" data-label="철회">{{ r.withdrawn }}</td>
+            {%- for q in stats.questions if q.active %}<td class="num" data-label="질문{{ loop.index }} 기명">{{ r.named.get(q.key, 0) }}</td>{% endfor %}
+            <td class="num" data-label="파일 인원">{{ r.eligible }}</td>
+            <td class="actions" data-label="">
+              <a class="btn btn-secondary btn-row" href="/admin/consent/{{ agenda.code }}/recipients/{{ r.key }}.pdf" target="_blank" rel="noopener">명단 PDF</a>
+              <a class="btn btn-secondary btn-row" href="/admin/consent/{{ agenda.code }}/recipients/{{ r.key }}.csv">명단 CSV</a>
+            </td>
+          </tr>
+        {%- endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="stats-note">제출 파일(명단 PDF·CSV)에는 제공에 동의하고 1개 이상의 요청에 동의한 유효 기록만 들어가며, 각 사람의 질문별 실제 답변을 그대로 표시합니다. 접속 IP·브라우저 정보와 다른 제출처에 대한 선택은 넣지 않습니다.</p>
+  </section>
+
+  <form class="filters" method="get" action="/admin/consent/{{ agenda.code }}">
+    <label class="filter"><span>동</span><input class="input" name="building" value="{{ filters.building }}" inputmode="numeric" maxlength="10" autocomplete="off"></label>
+    <label class="filter"><span>호수</span><input class="input" name="unit" value="{{ filters.unit }}" inputmode="numeric" maxlength="10" autocomplete="off"></label>
+    <label class="filter filter-wide"><span>성명</span><input class="input" name="name" value="{{ filters.name }}" maxlength="30" autocomplete="off"></label>
+    <label class="filter"><span>상태</span>
+      <select class="input" name="status">
+        <option value="">전체</option>
+        {%- for value, label in status_labels.items() %}
+        <option value="{{ value }}"{% if filters.status == value %} selected{% endif %}>{{ label }}</option>
+        {%- endfor %}
+      </select>
+    </label>
+    <label class="filter"><span>문서 버전</span>
+      <select class="input" name="version">
+        <option value="">전체</option>
+        {%- for label in version_labels %}
+        <option value="{{ label }}"{% if filters.version == label %} selected{% endif %}>{{ label }}</option>
+        {%- endfor %}
+      </select>
+    </label>
+    <label class="filter"><span>질문</span>
+      <select class="input" name="question">
+        <option value="">전체</option>
+        {%- for q in question_options %}
+        <option value="{{ q.key }}"{% if filters.question == q.key %} selected{% endif %}>{{ q.title }}</option>
+        {%- endfor %}
+      </select>
+    </label>
+    <label class="filter"><span>답변</span>
+      <select class="input" name="answer">
+        <option value="">전체</option>
+        <option value="AGREE"{% if filters.answer == "AGREE" %} selected{% endif %}>동의</option>
+        <option value="DISAGREE"{% if filters.answer == "DISAGREE" %} selected{% endif %}>동의하지 않음</option>
+      </select>
+    </label>
+    <label class="filter"><span>제출처</span>
+      <select class="input" name="recipient">
+        <option value="">전체</option>
+        {%- for r in recipient_options %}
+        <option value="{{ r.key }}"{% if filters.recipient == r.key %} selected{% endif %}>{{ r.short_name }}</option>
+        {%- endfor %}
+      </select>
+    </label>
+    <label class="filter"><span>제공 동의</span>
+      <select class="input" name="provision">
+        <option value="">전체</option>
+        {%- for value, label in provision_filters.items() %}
+        <option value="{{ value }}"{% if filters.provision == value %} selected{% endif %}>{{ label }}</option>
+        {%- endfor %}
+      </select>
+    </label>
+    <div class="filter-actions">
+      <button class="btn btn-primary" type="submit">검색</button>
+      <a class="btn btn-ghost" href="/admin/consent/{{ agenda.code }}">초기화</a>
+    </div>
+  </form>
+  <p class="stats-note">질문 필터는 답변을, 제출처 필터는 제공 동의 조건을 함께 골라야 적용됩니다.</p>
+
+  <div class="list-bar">
+    <p class="list-count">{{ rows|length }}건 표시 · 최신순</p>
+    <a class="btn btn-secondary" href="{{ export_url }}">내부용 CSV</a>
+  </div>
+
+  <div class="table-wrap">
+    <table class="table table-cards">
+      <thead>
+        <tr>
+          <th scope="col">제출시간</th><th scope="col">동</th><th scope="col">호수</th><th scope="col">성명</th>
+          <th scope="col">질문별 답변</th><th scope="col">제공 동의</th><th scope="col">서명</th><th scope="col">상태</th>
+          <th scope="col"><span class="sr-only">관리</span></th>
+        </tr>
+      </thead>
+      <tbody>
+      {%- for row in rows %}
+        {%- set answers = row.answer_map() %}
+        {%- set provisions = row.provision_map() %}
+        <tr{% if row.status != "ACTIVE" %} class="is-invalid"{% endif %}>
+          <td class="nowrap" data-label="제출시간">{{ row.submitted_at|kst }}</td>
+          <td data-label="동">{{ row.building }}</td>
+          <td data-label="호수">{{ row.unit }}</td>
+          <td class="nowrap" data-label="성명">{{ row.resident_name }}</td>
+          <td data-label="답변"><span class="tag-list">
+            {%- for q in question_options %}{% if q.key in answers %}
+            <span class="tag tag-{{ answers[q.key]|lower }}" title="{{ q.title }}">{{ question_short[q.key] }} {{ answer_labels[answers[q.key]] }}</span>
+            {%- endif %}{% endfor %}
+          </span></td>
+          <td data-label="제공"><span class="tag-list">
+            {%- for r in recipient_options %}
+            {%- set pv = provisions.get(r.key) %}
+            <span class="tag {% if pv and pv.effective %}tag-agree{% elif pv and pv.agreed %}tag-muted{% else %}tag-disagree{% endif %}">{{ r.short_name }} {% if pv is none %}-{% elif not pv.agreed %}비동의{% elif pv.withdrawn_at %}철회{% else %}동의{% endif %}</span>
+            {%- endfor %}
+          </span></td>
+          <td data-label="서명">
+            <a class="sig-thumb" href="/admin/consent-submissions/{{ row.public_id }}?back={{ current_url|urlencode }}" aria-label="{{ row.building }}동 {{ row.unit }}호 상세 보기">
+              <img src="/admin/consent-submissions/{{ row.public_id }}/signature.png" alt="" width="120" height="60" loading="lazy">
+            </a>
+          </td>
+          <td data-label="상태"><span class="status status-{{ row.status|lower }}">{{ status_labels[row.status] }}</span></td>
+          <td class="actions" data-label="">
+            <a class="btn btn-secondary btn-row" href="/admin/consent-submissions/{{ row.public_id }}?back={{ current_url|urlencode }}">상세</a>
+            <a class="btn btn-secondary btn-row" href="/admin/consent-submissions/{{ row.public_id }}/pdf" target="_blank" rel="noopener">PDF 보기</a>
+          </td>
+        </tr>
+      {%- else %}
+        <tr><td class="empty" colspan="9">{% if filters.query_string() %}검색 조건에 맞는 제출이 없습니다.{% else %}아직 제출된 온라인 동의서가 없습니다.{% endif %}</td></tr>
+      {%- endfor %}
+      </tbody>
+    </table>
+  </div>
+  <section class="panel" aria-labelledby="purge-title">
+    <h2 class="panel-title" id="purge-title">접속 IP·브라우저 정보 파기</h2>
+    <p class="panel-help">
+      공지한 보유기간이 지나면 이 안건 제출 기록의 접속 IP·브라우저 정보만 지웁니다(동·호수·성명·서명·답변은 그대로).
+      지운 정보는 되살릴 수 없고, 이전에 만든 DB 백업·내보내기 파일에는 그 보관기간이 끝날 때까지 남아 있습니다.
+    </p>
+    <form class="purge-form" method="post" action="/admin/consent/{{ agenda.code }}/access-info/purge"
+          data-confirm="입력한 일수보다 오래된 제출 기록의 접속 IP·브라우저 정보를 지울까요? 되돌릴 수 없습니다.">
+      <input type="hidden" name="csrf" value="{{ csrf_token }}">
+      <label class="field-label" for="purge-days">제출 후 경과 일수</label>
+      <div class="purge-row">
+        <input class="input" id="purge-days" name="days" inputmode="numeric" maxlength="4" required autocomplete="off" placeholder="예: 30">
+        <button class="btn btn-danger" type="submit">접속 정보 지우기</button>
+      </div>
+    </form>
+  </section>
+
+  {% if version %}
+  <p class="doc-meta">게시 버전 {{ version.label }} · 본문 확인값 SHA-256 <code>{{ version.content_hash }}</code> ({{ version.hash_scheme }})</p>
+  {% endif %}
+</main>
+{% endblock %}

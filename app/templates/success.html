@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}제출 완료 · 주민의견서{% endblock %}
+{% block title %}제출 완료 · {% if kind == "consent" %}온라인 동의서{% else %}주민의견서{% endif %}{% endblock %}
 
 {% block body %}
 <main class="page page-center">
@@ -8,10 +8,10 @@
       <circle cx="36" cy="36" r="34" fill="currentColor"/>
       <path d="M21 37.5l10 10 20-22" fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
-    <h1 class="done-title">주민의견서가 정상적으로 제출되었습니다.</h1>
+    <h1 class="done-title">{% if kind == "consent" %}온라인 동의서가{% else %}주민의견서가{% endif %} 정상적으로 제출되었습니다.</h1>
     <p class="done-text">참여해 주셔서 감사합니다.</p>
     <div class="receipt">
-      <p>제출일시: <strong>{{ submitted_at }}</strong></p>
+      <p>제출일시: <strong>{{ submitted_at }}</strong> (한국시간)</p>
       <p>제출번호: <strong class="receipt-no">{{ receipt_no }}</strong></p>
     </div>
     <p class="note">필요하시면 이 화면을 캡처해 보관해 주세요.</p>

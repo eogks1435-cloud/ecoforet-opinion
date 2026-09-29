@@ -1,0 +1,25 @@
+{#- Consent wording helpers. Text allows only paragraphs, line breaks and **bold**; everything is escaped. -#}
+{% macro rich(text) -%}
+{%- for paragraph in rich_blocks(text) %}
+<p>{% for line in paragraph %}{% if not loop.first %}<br>{% endif %}{% for run, bold in line %}{% if bold %}<strong>{{ run }}</strong>{% else %}{{ run }}{% endif %}{% endfor %}{% endfor %}</p>
+{%- endfor %}
+{%- endmacro %}
+
+{#- An operator setting: its text, or (preview only) a red marker telling what still has to be entered. -#}
+{% macro setting(value, label, preview) -%}
+{%- if value %}{{ rich(value) }}{% elif preview %}<p><span class="missing">[게시 전 입력: {{ label }}]</span></p>{% endif -%}
+{%- endmacro %}
+
+{% macro choice_pair(name, agree_label, disagree_label, disabled=False) -%}
+<div class="choice-pair">
+  <label class="choice">
+    <input class="choice-input" type="radio" name="{{ name }}" value="AGREE"{% if disabled %} disabled{% endif %} aria-describedby="error-{{ name }}">
+    <span class="choice-box"><span class="choice-dot" aria-hidden="true"></span><span class="choice-text">{{ agree_label }}</span></span>
+  </label>
+  <label class="choice">
+    <input class="choice-input" type="radio" name="{{ name }}" value="DISAGREE"{% if disabled %} disabled{% endif %} aria-describedby="error-{{ name }}">
+    <span class="choice-box"><span class="choice-dot" aria-hidden="true"></span><span class="choice-text">{{ disagree_label }}</span></span>
+  </label>
+</div>
+<p class="field-error" id="error-{{ name }}" hidden></p>
+{%- endmacro %}
