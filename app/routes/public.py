@@ -63,6 +63,16 @@ def _temporary_failure() -> JSONResponse:
     return _json(503, ok=False, code="temporary", message=TEMPORARY_FAILURE_MESSAGE)
 
 
+def _release_connection(db: Session) -> None:
+    """End the read-only transaction so the pooled connection is free during the slow part of a request.
+
+    Checking a signature or rendering the long consent page waits for the small instance's CPU; holding a
+    connection meanwhile starved the pool under a burst (requests failed after the 30 s pool timeout). What was
+    read stays loaded (expire_on_commit=False); the next query simply takes a connection again.
+    """
+    db.commit()
+
+
 def _active_submission_exists(db: Session, building: str, unit: str) -> bool:
     return bool(
         db.scalar(
@@ -106,6 +116,7 @@ def opinion_form(request: Request, db: Session = Depends(get_db)):
             context = consent_page_context(
                 version.content, agenda_code=agenda.code, version_label=version.label, accepting=agenda.accepting
             )
+            _release_connection(db)
             return templates.TemplateResponse(request, "consent.html", context, headers={"Cache-Control": "no-cache"})
     current = document.active_document(db)
     if current is None:  # only before the first start has seeded the table
@@ -237,14 +248,16 @@ def _stored_for_token(db: Session, token: str) -> ConsentSubmission | None:
     return db.scalar(select(ConsentSubmission).where(ConsentSubmission.client_token == token))
 
 
-def _replay(earlier: ConsentSubmission, fields: dict[str, str]) -> JSONResponse:
+def _replay(db: Session, earlier: ConsentSubmission, fields: dict[str, str]) -> JSONResponse:
     """This page's request was stored already (its answer may have been lost on the way).
 
     The same request gets the first receipt, whatever happened since (new version, pause, agenda switch);
     anything else sent with the same page token is refused, so one page never creates two records.
     """
+    content = earlier.version.content  # loaded together with the submission
+    _release_connection(db)
     try:
-        data = consent.validate_consent(fields, earlier.version.content)
+        data = consent.validate_consent(fields, content)
     except FormErrors:
         data = None
     if data is not None and earlier.request_hash == data.request_hash(earlier.version_label):
@@ -269,7 +282,7 @@ def submit_consent(
     try:
         earlier = _stored_for_token(db, token)
         if earlier is not None:  # a retry: answered before the agenda, pause and version checks
-            return _replay(earlier, fields)
+            return _replay(db, earlier, fields)
         agenda = consent.agenda_by_code(db, fields.get("agenda_code", ""))
         if agenda is None or agenda.kind != AGENDA_CONSENT or not agenda.is_public:
             return _json(409, ok=False, code="document_changed", message=AGENDA_CHANGED_MESSAGE)
@@ -279,6 +292,7 @@ def submit_consent(
         # A signature only counts for the wording the resident actually read.
         if version is None or fields.get("version_label") != version.label:
             return _json(409, ok=False, code="document_changed", message=CONSENT_CHANGED_MESSAGE)
+        _release_connection(db)  # nothing written yet; the insert below takes a connection again
     except SQLAlchemyError:
         db.rollback()
         logger.exception("consent agenda lookup failed")
@@ -325,7 +339,7 @@ def submit_consent(
         try:
             earlier = _stored_for_token(db, token)
             if earlier is not None:  # the same request arrived twice at the same moment
-                return _replay(earlier, fields)
+                return _replay(db, earlier, fields)
             duplicate = consent.active_submission_exists(db, agenda.id, data.building, data.unit)
         except SQLAlchemyError:
             db.rollback()

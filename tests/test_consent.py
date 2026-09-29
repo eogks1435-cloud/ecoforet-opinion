@@ -39,6 +39,7 @@ from app.models import (
     OpinionDocument,
     OpinionSubmission,
 )
+from app.templating import templates
 
 from .conftest import ADMIN_PASSWORD, FETCH_HEADERS, ORIGIN, csrf_from, signature_data_url
 
@@ -527,8 +528,11 @@ def test_simultaneous_submissions_for_one_unit_leave_one_valid_record(db):
 
 def test_a_storage_failure_is_never_reported_as_success(client, db, monkeypatch):
     publish_ready(db)
+    commit = Session.commit
 
     def broken_commit(self):
+        if not self.new:  # the read-only commit that frees the connection before the signature check
+            return commit(self)
         raise OperationalError("INSERT INTO consent_submissions", {}, Exception("simulated failure"))
 
     monkeypatch.setattr(Session, "commit", broken_commit)
@@ -536,6 +540,33 @@ def test_a_storage_failure_is_never_reported_as_success(client, db, monkeypatch)
     monkeypatch.undo()
     assert response.status_code == 503 and response.json()["ok"] is False and "redirect" not in response.json()
     assert rows_of(db) == []
+
+
+def test_no_connection_is_held_while_the_page_renders_or_a_signature_is_checked(client, db, monkeypatch):
+    """Under a burst the small instance's CPU is the queue: waiting for it must not also hold a pooled connection."""
+    publish_ready(db)
+    db.commit()
+    idle = engine.pool.checkedout()
+    held: list[tuple[str, int]] = []
+    check, render = consent.validate_consent, templates.TemplateResponse
+
+    def checking(*args, **kwargs):
+        held.append(("check", engine.pool.checkedout() - idle))
+        return check(*args, **kwargs)
+
+    def rendering(*args, **kwargs):
+        held.append(("render", engine.pool.checkedout() - idle))
+        return render(*args, **kwargs)
+
+    monkeypatch.setattr(consent, "validate_consent", checking)
+    monkeypatch.setattr(templates, "TemplateResponse", rendering)
+    assert client.get("/opinion").status_code == 200
+    form = consent_form()
+    assert post_consent(client, form).status_code == 201
+    assert post_consent(client, form).status_code == 201  # the retry is answered by the replay path
+    monkeypatch.undo()
+    assert held == [("render", 0), ("check", 0), ("check", 0)]
+    assert len(rows_of(db)) == 1
 
 
 def test_records_and_signatures_survive_a_restart(db):
