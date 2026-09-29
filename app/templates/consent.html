@@ -128,8 +128,18 @@
       </div>
     </section>
 
+    <div class="agree-all" id="agree-all-box">
+      <label class="check">
+        <input class="check-input" type="checkbox" id="agree-all" aria-describedby="agree-all-help">
+        <span class="check-box"><span class="check-mark" aria-hidden="true"></span><span class="check-text"><strong>개인정보 관련 항목에 모두 동의합니다</strong></span></span>
+      </label>
+      <p class="agree-all-help" id="agree-all-help">아래 {{ 2 + c.recipients|length if overseas_on else 1 + c.recipients|length }}개 항목(개인정보 수집·이용{% if overseas_on %}, 국외 이전{% endif %}{% for r in c.recipients %}, {{ r.short_name or r.name }} 제공{% endfor %})에 한 번에 '동의합니다'가 선택됩니다. 항목마다 따로 동의받으며, 각 내용은 '안내 보기'에서 확인하고 항목별로 바꿀 수 있습니다.</p>
+    </div>
+
     <section class="section consent-privacy" aria-labelledby="privacy-title">
       <h2 class="section-title" id="privacy-title">{{ p.title }}</h2>
+      <details class="notice"{% if preview %} open{% endif %}>
+      <summary>개인정보 수집·이용 안내 보기</summary>
       <h3 class="sub-title">① 개인정보 수집·관리 주체 및 연락처</h3>
       <dl class="info-list">
         <div><dt>수집·관리 주체</dt><dd>{{ setting(p.controller, "실제 운영 주체의 명칭", preview) }}</dd></div>
@@ -155,6 +165,7 @@
       {% endif %}
       <h3 class="sub-title">⑤ 동의 거부권 및 거부 시 영향</h3>
       {{ rich(p.refusal) }}
+      </details>
       <fieldset class="question" data-field="privacy_consent" data-summary="개인정보 수집·이용">
         <legend class="question-title">{{ p.question }}</legend>
         {{ choice_pair("privacy_consent", p.agree_label, p.disagree_label) }}
@@ -165,6 +176,8 @@
     <section class="section consent-overseas" aria-labelledby="overseas-title">
       <h2 class="section-title" id="overseas-title">{{ o.title }}</h2>
       {{ rich(o.intro) }}
+      <details class="notice"{% if preview %} open{% endif %}>
+      <summary>국외 이전 안내 보기</summary>
       <dl class="info-list">
         <div><dt>이전되는 항목</dt><dd>{{ rich(o['items']) }}</dd></div>
         <div><dt>이전되는 국가</dt><dd>{{ rich(o.country) }}</dd></div>
@@ -176,6 +189,7 @@
       <p class="info-label">거부 방법과 효과</p>
       {{ rich(o.refusal) }}
       <div class="participant-target"><p class="info-label">다른 참여 방법</p>{{ setting(o.alternative, "국외 이전에 동의하지 않는 주민의 다른 참여 방법", preview) }}</div>
+      </details>
       <fieldset class="question" data-field="overseas_consent" data-summary="개인정보 국외 이전">
         <legend class="question-title">{{ o.question }}</legend>
         {{ choice_pair("overseas_consent", o.agree_label, o.disagree_label) }}
@@ -189,6 +203,8 @@
       {%- for r in c.recipients %}
       <div class="recipient">
         <h3 class="sub-title">{{ r.heading }}</h3>
+        <details class="notice"{% if preview %} open{% endif %}>
+        <summary>{{ r.short_name or r.name }} 제공 안내 보기</summary>
         <dl class="info-list">
           <div><dt>① 제공받는 자</dt><dd>{{ rich(r.name) }}</dd></div>
           <div><dt>② 이용 목적</dt><dd>{{ rich(r.purpose) }}</dd></div>
@@ -197,16 +213,17 @@
         </dl>
         <p class="info-label">⑤ 동의 거부권 및 거부 시 영향</p>
         {{ rich(r.refusal) }}
+        </details>
         <fieldset class="question" data-field="provide_{{ r.key }}" data-summary="{{ r.short_name or r.name }} 제공">
           <legend class="question-title">{{ r.question }}</legend>
           {{ choice_pair("provide_" ~ r.key, r.agree_label, r.disagree_label) }}
         </fieldset>
       </div>
       {%- endfor %}
-      <div class="notes">
-        <h3 class="notes-title">{{ c.principles_title }}</h3>
+      <details class="notice notes"{% if preview %} open{% endif %}>
+        <summary>{{ c.principles_title }}</summary>
         {{ rich(c.principles) }}
-      </div>
+      </details>
     </section>
 
     <section class="section" aria-labelledby="final-title">

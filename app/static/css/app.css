@@ -426,5 +426,15 @@ legend.section-title + * { clear: both; }
 .summary-answers li span { padding-right: 10px; }
 .summary-answers li strong { flex: none; }
 .preview-banner p { max-width: 720px; margin: 0 auto; }
+.agree-all { margin: 0 0 16px; padding: 14px 16px; border: 2px solid var(--accent); border-radius: 12px; background: var(--accent-soft); }
+.agree-all .check-text strong { font-size: 18px; }
+.agree-all-help { margin: 8px 0 0; font-size: 15px; line-height: 1.6; color: var(--muted); }
+details.notice { margin: 8px 0 14px; padding: 0 14px; border: 1px solid var(--line); border-radius: 10px; background: #fafbfc; }
+details.notice > summary { display: flex; align-items: center; min-height: 48px; font-size: 16px; font-weight: 600; color: var(--accent); cursor: pointer; list-style: none; }
+details.notice > summary::-webkit-details-marker { display: none; }
+details.notice > summary::after { content: "▾"; margin-left: auto; padding-left: 8px; color: var(--accent); }
+details.notice[open] > summary { border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+details.notice[open] > summary::after { content: "▴"; }
+details.notice[open] { padding-bottom: 10px; }
 .preview-banner .preview-meta { margin-top: 4px; font-size: 13px; font-weight: 400; word-break: break-all; }
 .preview-banner a { color: inherit; }

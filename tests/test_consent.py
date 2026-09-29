@@ -299,6 +299,19 @@ def test_public_page_after_the_switch_shows_real_unselected_choices(client, db):
     assert "수신" in page and "주식회사 케이비아주 대표이사 귀하" in page
 
 
+def test_agree_all_box_and_folded_notices_leave_each_consent_separate(client, admin, db):
+    publish_ready(db)
+    page = client.get("/opinion").text
+    box = re.search(r'<input[^>]*id="agree-all"[^>]*>', page).group(0)
+    assert "name=" not in box  # never submitted: each consent is still its own answer
+    assert "4개 항목(개인정보 수집·이용, 국외 이전, 케이비아주 제공, 강동구 제공)" in page
+    assert page.count('<details class="notice') == 5 and " open>" not in page.split('id="agree-all-box"')[1]
+    for name in ("privacy_consent", "overseas_consent", "provide_company", "provide_district"):
+        assert page.count(f'name="{name}"') == 2  # its own 동의 / 동의하지 않음 pair, outside the folded notice
+    preview = admin.get(f"/admin/consent/{CODE}/preview").text
+    assert preview.count('<details class="notice" open') == 4 and '<details class="notice notes" open' in preview
+
+
 def test_the_legacy_form_is_refused_after_the_switch(client, submit, db):
     publish_ready(db)
     response = submit()

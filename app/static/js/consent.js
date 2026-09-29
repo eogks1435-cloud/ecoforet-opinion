@@ -161,6 +161,36 @@
   onEnter(unit, nameInput);
   onEnter(nameInput, null);
 
+  // "모두 동의": picks 동의합니다 in every personal-data consent group at once. Each group is still answered
+  // (and stored) separately and can be changed on its own; the box follows whatever the groups say.
+  var agreeAll = byId('agree-all');
+  var consentGroups = [];
+  for (var g = 0; g < groups.length; g++) {
+    var groupName = groups[g].name;
+    if (groupName === 'privacy_consent' || groupName === 'overseas_consent' || groupName.indexOf('provide_') === 0) {
+      consentGroups.push(groupName);
+    }
+  }
+  function syncAgreeAll() {
+    if (!agreeAll) return;
+    var all = consentGroups.length > 0;
+    for (var i = 0; i < consentGroups.length; i++) {
+      if (checkedValue(consentGroups[i]) !== 'AGREE') all = false;
+    }
+    agreeAll.checked = all;
+  }
+  if (agreeAll) {
+    agreeAll.addEventListener('change', function () {
+      for (var i = 0; i < consentGroups.length; i++) {
+        var radios = form.querySelectorAll('input[name="' + consentGroups[i] + '"]');
+        for (var j = 0; j < radios.length; j++) {
+          radios[j].checked = agreeAll.checked && radios[j].value === 'AGREE';
+        }
+        if (agreeAll.checked) setError(consentGroups[i], '');
+      }
+    });
+  }
+
   nameInput.addEventListener('input', function () { setError('resident_name', ''); });
   form.addEventListener('change', function (event) {
     var name = event.target.name;
@@ -173,6 +203,7 @@
     } else if (event.target === finalBox) {
       setError('final_confirmed', '');
     }
+    syncAgreeAll();
   });
 
   function validate() {
@@ -344,6 +375,7 @@
   })();
 
   window.addEventListener('pageshow', function (event) {
+    syncAgreeAll(); // the browser may have restored the radio choices
     if (!event.persisted) return;
     submitting = false;
     setBusy(false);
@@ -351,5 +383,6 @@
     pad.resize();
   });
 
+  syncAgreeAll();
   if (preview || !accepting) submitButton.disabled = true;
 })();
