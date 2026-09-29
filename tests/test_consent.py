@@ -644,6 +644,7 @@ def test_nothing_personal_or_unpublished_is_reachable_without_login(client, db):
         f"/admin/consent/{CODE}/edit", f"/admin/consent/{CODE}/preview", f"/admin/consent/{CODE}/versions/{V1}",
         f"/admin/consent/{CODE}/export.csv", f"/admin/consent/{CODE}/recipients/company.csv",
         f"/admin/consent/{CODE}/recipients/district.pdf", record, f"{record}/pdf", f"{record}/pdf/company",
+        f"/admin/consent/{CODE}/blank.pdf", f"/admin/consent/{CODE}/blank.pdf?draft=1",
     ]
     for url in pages:
         response = client.get(url, follow_redirects=False)
@@ -977,6 +978,27 @@ def test_a_draft_saved_before_the_overseas_section_gets_it_and_a_stale_page_cann
     assert conflict.status_code == 409
     db.expire_all()
     assert db.get(ConsentDraft, agenda.id).content["overseas"]["enabled"] is True
+
+
+def test_blank_paper_form_has_the_published_wording_and_nothing_personal(admin, db):
+    missing = admin.get(f"/admin/consent/{CODE}/blank.pdf")
+    assert missing.status_code == 404 and "게시된 버전이 없습니다" in missing.text
+    draft = admin.get(f"/admin/consent/{CODE}/blank.pdf?draft=1")
+    assert draft.status_code == 200 and "초안 미리보기" in pdf_text(draft.content)
+
+    publish_ready(db)
+    assert post_consent(admin, resident_name="가상비밀주민").status_code == 201
+    response = admin.get(f"/admin/consent/{CODE}/blank.pdf")
+    assert response.status_code == 200 and response.headers["content-type"] == "application/pdf"
+    text = pdf_text(response.content)
+    for expected in ("관리사무소장 교체 및 관리업무 특별조사 요청", "질문 1. 관리사무소장 교체 요청", "질문 3.",
+                     "서면 제출 안내", "테스트용 다른 참여 방법", V1, "작성일", "테스트용 참여 대상(가상)",
+                     "위 개인정보 수집·이용에 동의하십니까?", "케이비아주에 위 개인정보를 제공하는 것에 동의하십니까?"):
+        assert expected in text, expected
+    assert "5-1. 개인정보 국외 이전" not in text  # paper forms are not stored abroad
+    assert "가상비밀주민" not in text and "초안 미리보기" not in text
+    assert admin.get(f"/admin/consent/{CODE}/blank.pdf?version={V1}").status_code == 200
+    assert admin.get(f"/admin/consent/{CODE}/blank.pdf?version=NOPE").status_code == 404
 
 
 def test_a_column_added_later_is_created_on_an_existing_table(tmp_path):

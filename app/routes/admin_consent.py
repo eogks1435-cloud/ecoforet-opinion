@@ -554,6 +554,36 @@ def access_info_purge(code: str, request: Request, db: Session = Depends(get_db)
     return RedirectResponse(target, status_code=303)
 
 
+@router.get("/consent/{code}/blank.pdf")
+def blank_form_pdf(code: str, request: Request, db: Session = Depends(get_db), version: str = "", draft: str = ""):
+    """Printable paper form of a published version (default: the current one), or of the draft (preview only)."""
+    if not is_admin(request):
+        return to_login()
+    agenda = _consent_agenda(db, code)
+    if agenda is None:
+        return Response(status_code=404)
+    if draft == "1":
+        stored = consent.draft_of(db, agenda)
+        if stored is None:
+            return Response(status_code=404)
+        content = consent.normalize_content(stored.content)
+        label, digest = "초안", consent.content_hash(content)
+    else:
+        record = consent.version_by_label(db, agenda, version) if version else consent.current_version(db, agenda)
+        if record is None:
+            return Response("게시된 버전이 없습니다. 먼저 동의서 문구를 게시하거나, 편집 화면의 초안 서면 미리보기를 이용해 주세요.",
+                            status_code=404, media_type="text/plain; charset=utf-8")
+        content, label, digest = record.content, record.label, record.content_hash
+    if not _pdf_slots.acquire(timeout=20):
+        return _busy()
+    try:
+        pdf = consent_pdf.build_blank_form_pdf(content, label, digest, draft=draft == "1")
+    finally:
+        _pdf_slots.release()
+    suffix = "draft" if draft == "1" else label
+    return _pdf_response(pdf, f"consent_{agenda.code}_paper_{suffix}.pdf")
+
+
 # ------------------------------------------------------------------------------------------ one record
 def _record(db: Session, public_id: uuid.UUID) -> ConsentSubmission | None:
     return db.scalar(select(ConsentSubmission).where(ConsentSubmission.public_id == public_id))

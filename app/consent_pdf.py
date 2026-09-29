@@ -6,6 +6,8 @@
   provision part, no status internals.
 - build_recipient_list_pdf(...): one recipient's list of named agreers (valid records that agreed to this
   recipient and to at least one request), each person's actual answer per question, then the wording.
+- build_blank_form_pdf(...): a paper form with a published version's wording, empty tick boxes and blank
+  동·호수·성명·서명·작성일, for residents who take part on paper (it has no overseas-transfer section).
 
 None of them contains IP addresses or browser data.
 """
@@ -178,6 +180,74 @@ class _Doc:
         pdf.cell(self.width - label_w, height, "", border=1, new_x="LMARGIN", new_y="NEXT")
         pdf.image(io.BytesIO(png), x=pdf.l_margin + label_w + 4, y=top + 2, w=self.width - label_w - 8,
                   h=height - 4, keep_aspect_ratio=True)
+
+    def boxes(self, *labels: str, size: float = 10.5) -> None:
+        """Empty tick boxes on one line (drawn squares: the □ glyph marks missing characters elsewhere)."""
+        pdf = self.pdf
+        self.room(10)
+        x, top = pdf.l_margin + 4, pdf.get_y()
+        pdf.set_font(FONT, "", size)
+        pdf.set_draw_color(40, 40, 40)
+        for label in labels:
+            pdf.rect(x, top + 1.7, 4.2, 4.2)
+            pdf.set_xy(x + 6, top)
+            text = self.t(label)
+            pdf.cell(pdf.get_string_width(text) + 2, 7.6, text)
+            x = pdf.get_x() + 10
+        pdf.set_xy(pdf.l_margin, top + 7.6)
+        self.gap(1.5)
+
+    def tick_line(self, text: str, size: float = 10.5, bold: bool = True) -> None:
+        """One empty tick box followed by a (possibly long) sentence."""
+        pdf = self.pdf
+        self.room(12)
+        top = pdf.get_y()
+        pdf.set_draw_color(40, 40, 40)
+        pdf.rect(pdf.l_margin, top + 1.6, 4.2, 4.2)
+        pdf.set_xy(pdf.l_margin + 6.5, top)
+        pdf.set_font(FONT, "B" if bold else "", size)
+        pdf.multi_cell(self.width - 6.5, 6.6, self.t(text), align="L", new_x="LMARGIN", new_y="NEXT")
+
+    def blank_rows(self, rows: list[tuple[str, str]], label_w: float = 30, row_h: float = 13) -> None:
+        """Label | empty writing space (with an optional faint guide such as '동   호')."""
+        pdf = self.pdf
+        pdf.set_draw_color(90, 90, 90)
+        for label, guide in rows:
+            pdf.set_font(FONT, "B", 10.5)
+            pdf.set_text_color(0, 0, 0)
+            pdf.cell(label_w, row_h, self.t(label), border=1, align="C")
+            pdf.set_font(FONT, "", 10.5)
+            pdf.set_text_color(*GREY)
+            pdf.cell(self.width - label_w, row_h, self.t(guide), border=1, align="R", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(0, 0, 0)
+
+    def blank_signature(self, label_w: float = 30, height: float = 32) -> None:
+        pdf = self.pdf
+        pdf.set_draw_color(90, 90, 90)
+        pdf.set_font(FONT, "B", 10.5)
+        pdf.cell(label_w, height, "서명", border=1, align="C")
+        pdf.cell(self.width - label_w, height, "", border=1, new_x="LMARGIN", new_y="NEXT")
+
+    def note_box(self, title: str, lines: list[str]) -> None:
+        """A framed block of short notes (kept on one page when it fits)."""
+        pdf = self.pdf
+        pdf.set_font(FONT, "", 9.8)
+        body = [self.t(line) for line in lines if line]
+        height = 8 + sum(5.6 * len(pdf.multi_cell(self.width - 8, 5.6, line, dry_run=True, output="LINES"))
+                         for line in body)
+        self.room(height + 4)
+        top = pdf.get_y()
+        pdf.set_xy(pdf.l_margin + 4, top + 3)
+        pdf.set_font(FONT, "B", 10.5)
+        pdf.cell(self.width - 8, 6, self.t(title), new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font(FONT, "", 9.8)
+        for line in body:
+            pdf.set_x(pdf.l_margin + 4)
+            pdf.multi_cell(self.width - 8, 5.6, line, align="L", new_x="LMARGIN", new_y="NEXT")
+        bottom = pdf.get_y() + 2
+        pdf.set_draw_color(120, 120, 120)
+        pdf.rect(pdf.l_margin, top, self.width, bottom - top)
+        pdf.set_y(bottom + 3)
 
     def output(self) -> bytes:
         return bytes(self.pdf.output())
@@ -502,5 +572,76 @@ def build_recipient_list_pdf(agenda: Agenda, recipient_key: str, rows: list[Cons
             doc.line(f"본문 확인값 SHA-256 {digest}", size=8.4, color=GREY, height=4.8)
         doc.gap(2)
         _wording_only(doc, shown[label])
+    doc.missing_glyph_note()
+    return doc.output()
+
+
+# ------------------------------------------------------------------------------------------ paper form
+def build_blank_form_pdf(content: Mapping, label: str, digest: str, *, draft: bool = False) -> bytes:
+    """A printable paper form: the version's wording with empty tick boxes and blank fields.
+
+    Residents who do not agree to the overseas transfer take part on paper, so the overseas-transfer section
+    is left out and a "서면 제출 안내" block says what differs on paper (plus the operator's own text on how
+    paper forms are taken in). The system-time footer note of the online form is replaced by a 작성일 field.
+    """
+    footer = "서면 동의서 · 초안(배포용 아님)" if draft else f"서면 동의서 · {label}"
+    doc = _Doc(f"{content['title']} {content.get('subtitle', '')} - 서면 동의서", footer=footer)
+    if draft:
+        doc.line("초안 미리보기 · 게시 전 확인용이며 주민에게 배포하지 마세요", size=10.5, bold=True, align="C",
+                 color=RED, height=6.4)
+    doc.line("서면 동의서", size=9.6, bold=True, align="R", color=GREY, height=5.6)
+    _document_head(doc, content)
+    _document_body(doc, content)
+
+    doc.heading(content["questions_title"])
+    doc.rich(content["questions_intro"])
+    doc.line("각 질문마다 한 칸에만 표시해 주세요.", size=9, color=GREY, height=5)
+    for number, question in enumerate(consent.active_questions(content), start=1):
+        doc.heading(f"질문 {number}. {question['title']}", 2)
+        doc.rich(question["text"])
+        doc.boxes(question["agree_label"], question["disagree_label"])
+
+    doc.heading(content["participant_title"])
+    if content.get("participant_target"):
+        doc.label_value("참여 대상", content["participant_target"])
+    doc.room(75)
+    doc.blank_rows([("동·호수", "동                    호     "), ("성명", "")])
+    doc.blank_signature()
+    doc.blank_rows([("작성일", "년            월            일     ")])
+    doc.gap(3)
+    doc.heading(content["participation_notes_title"], 2)
+    doc.rich(content["participation_notes"], size=9.6)
+
+    _privacy_notice(doc, content)
+    privacy = content["privacy"]
+    doc.line(privacy["question"], bold=True, height=6.2)
+    doc.boxes(privacy["agree_label"], privacy["disagree_label"])
+
+    overseas = content.get("overseas") or {}
+    notes = [
+        f"이 서면 동의서는 온라인 동의서 {label}의 문안을 그대로 옮긴 것입니다. 같은 동·호수는 온라인과 서면을 "
+        "합쳐 한 번만 유효하게 참여할 수 있습니다.",
+        "서면으로 제출하시는 경우 접속 IP 주소·브라우저 정보는 수집하지 않으며, 제출번호와 제출일시 대신 "
+        "작성일을 직접 적습니다.",
+    ]
+    if overseas.get("alternative"):
+        notes.append(f"제출 방법: {' '.join(consent.plain_lines(overseas['alternative']))}")
+    doc.note_box("서면 제출 안내", notes)
+
+    doc.heading(content["provision_title"])
+    doc.rich(content["provision_intro"])
+    for recipient in content["recipients"]:
+        _recipient_notice(doc, recipient)
+        doc.line(recipient["question"], bold=True, height=6.2)
+        doc.boxes(recipient["agree_label"], recipient["disagree_label"])
+    doc.heading(content["principles_title"], 2)
+    doc.rich(content["principles"], size=9.6)
+
+    doc.room(72)  # the final statements and their tick box stay on one page
+    doc.heading(content["final_title"])
+    doc.rich(content["final_statements"])
+    doc.tick_line(content["final_checkbox"])
+    doc.gap(4)
+    doc.line(f"문서 버전 {label} · 본문 확인값 SHA-256 {digest}", size=8, color=GREY, height=4.6)
     doc.missing_glyph_note()
     return doc.output()

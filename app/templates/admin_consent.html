@@ -15,7 +15,8 @@
     <code>{{ agenda.code }}</code>
     · {% if agenda.is_public %}<span class="tag tag-agree">주민 페이지 공개 중</span>{% else %}<span class="tag tag-muted">비공개</span>{% endif %}
     {% if agenda.accepting %}<span class="tag tag-agree">접수 가능</span>{% else %}<span class="tag tag-disagree">접수 중지</span>{% endif %}
-    · 게시 버전 {% if version %}<a class="text-link" href="/admin/consent/{{ agenda.code }}/versions/{{ version.label }}">{{ version.label }}</a>{% else %}없음{% endif %}
+    · 게시 버전 {% if version %}<a class="text-link" href="/admin/consent/{{ agenda.code }}/versions/{{ version.label }}">{{ version.label }}</a>
+    · <a class="text-link" href="/admin/consent/{{ agenda.code }}/blank.pdf" target="_blank" rel="noopener">서면용 빈 동의서 PDF</a>{% else %}없음{% endif %}
   </p>
   {% if flash %}
   <p class="flash flash-{{ flash.kind }}" role="status">{{ flash.text }}</p>
