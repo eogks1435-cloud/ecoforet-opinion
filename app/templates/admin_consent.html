@@ -22,7 +22,11 @@
   {% endif %}
 
   <section class="panel" aria-labelledby="stats-title">
-    <h2 class="panel-title" id="stats-title">내부 접수 집계</h2>
+    <h2 class="panel-title" id="stats-title">내부 접수 집계{% if stats_version %} · {{ stats_version.label }}만{% endif %}</h2>
+    {% if stats_version %}
+    <p class="panel-help">문서 버전 필터가 적용되어 {{ stats_version.label }}로 받은 기록만, 그 버전의 질문 문구로 집계합니다.
+      <a class="text-link" href="/admin/consent/{{ agenda.code }}">전체 버전 집계 보기</a></p>
+    {% endif %}
     <div class="stats">
       <div class="stat"><p class="stat-label">유효 제출</p><p class="stat-value">{{ stats.active }}건</p></div>
       <div class="stat"><p class="stat-label">무효 처리</p><p class="stat-value">{{ stats.invalidated }}건</p></div>
@@ -201,12 +205,13 @@
       공지한 보유기간이 지나면 이 안건 제출 기록의 접속 IP·브라우저 정보만 지웁니다(동·호수·성명·서명·답변은 그대로).
       지운 정보는 되살릴 수 없고, 이전에 만든 DB 백업·내보내기 파일에는 그 보관기간이 끝날 때까지 남아 있습니다.
     </p>
+    <p class="current-meta">접속 정보가 남아 있는 기록: <strong>{{ access_rows }}건</strong>{% if access_oldest %} · 가장 이른 제출 {{ access_oldest|kst }}{% endif %}</p>
     <form class="purge-form" method="post" action="/admin/consent/{{ agenda.code }}/access-info/purge"
           data-confirm="입력한 일수보다 오래된 제출 기록의 접속 IP·브라우저 정보를 지울까요? 되돌릴 수 없습니다.">
       <input type="hidden" name="csrf" value="{{ csrf_token }}">
       <label class="field-label" for="purge-days">제출 후 경과 일수</label>
       <div class="purge-row">
-        <input class="input" id="purge-days" name="days" inputmode="numeric" maxlength="4" required autocomplete="off" placeholder="예: 30">
+        <input class="input" id="purge-days" name="days" type="number" min="1" max="3650" inputmode="numeric" required autocomplete="off" placeholder="예: 30">
         <button class="btn btn-danger" type="submit">접속 정보 지우기</button>
       </div>
     </form>
@@ -216,4 +221,8 @@
   <p class="doc-meta">게시 버전 {{ version.label }} · 본문 확인값 SHA-256 <code>{{ version.content_hash }}</code> ({{ version.hash_scheme }})</p>
   {% endif %}
 </main>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ static_url('js/admin.js') }}" defer></script>
 {% endblock %}

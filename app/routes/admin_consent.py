@@ -394,13 +394,23 @@ def consent_dashboard(code: str, request: Request, db: Session = Depends(get_db)
     filters, questions, recipients, labels = _filters(request, db, agenda)
     rows = _submissions(db, agenda, filters)
     query = filters.query_string()
+    stats_version = consent.version_by_label(db, agenda, filters.version) if filters.version else None
+    access_rows, access_oldest = db.execute(
+        select(func.count(), func.min(ConsentSubmission.submitted_at)).where(
+            ConsentSubmission.agenda_id == agenda.id,
+            (ConsentSubmission.ip_address.is_not(None)) | (ConsentSubmission.user_agent.is_not(None)),
+        )
+    ).one()
     context = {
         "active": "consent",
         "csrf_token": csrf_token(request),
         "flash": request.session.pop(FLASH_KEY, None),
         "agenda": agenda,
         "version": consent.current_version(db, agenda),
-        "stats": consent.consent_stats(db, agenda),
+        "stats": consent.consent_stats(db, agenda, stats_version),
+        "stats_version": stats_version,
+        "access_rows": int(access_rows or 0),
+        "access_oldest": access_oldest,
         "filters": filters,
         "question_options": questions,
         "question_short": _short_names(questions),
@@ -520,8 +530,8 @@ def access_info_purge(code: str, request: Request, db: Session = Depends(get_db)
     if not csrf_valid(request, csrf):
         flash(request, "error", EXPIRED_MESSAGE)
         return RedirectResponse(target, status_code=303)
-    if not days.strip().isdigit() or int(days) > 3650:
-        flash(request, "error", "경과 일수를 0 이상의 숫자로 입력해 주세요.")
+    if not days.strip().isdigit() or not 1 <= int(days) <= 3650:
+        flash(request, "error", "경과 일수를 1 이상의 숫자로 입력해 주세요.")
         return RedirectResponse(target, status_code=303)
     try:
         count = consent.purge_access_info(db, agenda, int(days))
@@ -721,6 +731,7 @@ def _editor_context(request: Request, db: Session, agenda: Agenda, content: dict
         ).all()
     )
     digest = consent.content_hash(content)
+    reworded = consent.reworded_questions(version.content if version else None, content)
     missing = {"/".join(path) for path, _label in consent.REQUIRED_SETTINGS if not consent._get(content, path).strip()}
     if content["privacy"]["collect_access_info"] and not content["privacy"]["retention_access"].strip():
         missing.add("privacy/retention_access")
@@ -733,6 +744,7 @@ def _editor_context(request: Request, db: Session, agenda: Agenda, content: dict
         "c": content,
         "p": content["privacy"],
         "blockers": consent.publish_blockers(content),
+        "reworded": reworded,
         "missing": missing,
         "draft_hash": digest,
         "draft_stamp": stamp,
@@ -780,7 +792,9 @@ def consent_save_draft(code: str, request: Request, db: Session = Depends(get_db
         return _not_found(request)
     draft = consent.draft_of(db, agenda)
     base = draft.content if draft else consent.SEED_CONTENT
-    content = consent.content_from_form(fields, base, consent.used_question_keys(db, agenda))
+    published = consent.current_version(db, agenda)
+    content = consent.content_from_form(fields, base, consent.used_question_keys(db, agenda),
+                                        published.content if published else None)
     if not csrf_valid(request, fields.get("csrf")):
         context = _editor_context(request, db, agenda, content, message=EXPIRED_MESSAGE, stamp=fields.get("draft_stamp", ""))
         return templates.TemplateResponse(request, "admin_consent_edit.html", context, status_code=400)
@@ -855,7 +869,7 @@ def consent_preview(code: str, request: Request, db: Session = Depends(get_db)):
 
 @router.post("/consent/{code}/publish")
 def consent_publish(code: str, request: Request, db: Session = Depends(get_db), csrf: str = Form(""),
-                    draft_hash: str = Form("")):
+                    draft_hash: str = Form(""), merge_reworded: str = Form("")):
     if not is_admin(request):
         return to_login()
     agenda = _consent_agenda(db, code)
@@ -866,11 +880,11 @@ def consent_publish(code: str, request: Request, db: Session = Depends(get_db), 
         flash(request, "error", EXPIRED_MESSAGE)
         return RedirectResponse(editor, status_code=303)
     draft = consent.draft_of(db, agenda)
-    if draft is None or consent.content_hash(draft.content) != draft_hash:
+    if draft is None or consent.content_hash(consent.normalize_content(draft.content)) != draft_hash:
         flash(request, "error", "게시하려던 초안이 그사이 바뀌었습니다. 화면을 다시 확인한 뒤 게시해 주세요.")
         return RedirectResponse(editor, status_code=303)
     try:
-        version = consent.publish(db, agenda, client_ip(request))
+        version = consent.publish(db, agenda, client_ip(request), merge_reworded=merge_reworded == "1")
     except consent.PublishError as exc:
         db.rollback()
         flash(request, "error", str(exc))
@@ -901,7 +915,7 @@ def consent_version_page(code: str, label: str, request: Request, db: Session = 
     context["version_meta"] = {
         "label": version.label,
         "hash": version.content_hash,
-        "hash_ok": consent.content_hash(version.content) == version.content_hash,
+        "hash_ok": consent.version_hash_ok(version),
         "scheme": version.hash_scheme,
         "created": format_kst(version.created_at, "%Y-%m-%d %H:%M:%S"),
     }

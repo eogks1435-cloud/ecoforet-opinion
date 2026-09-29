@@ -262,6 +262,8 @@ SEED_CONTENT: dict = {
             "다른 법령에 따라 보존해야 하는 경우에는 해당 근거와 기간에 따라 필요한 정보만 별도로 보존합니다."
         ),
         "storage_location": "",
+        # Operator confirmation, not shown to residents: what is destroyed when, how, and how backups are handled.
+        "destruction_plan": "",
         "refusal": (
             "개인정보 수집·이용에 동의하지 않을 권리가 있습니다.\n\n"
             "다만, 위 정보의 수집·이용에 동의하지 않는 경우 본 온라인 동의서의 기명 접수 및 동의자 확인이 "
@@ -284,6 +286,7 @@ SEED_CONTENT: dict = {
             "purpose": "관리사무소장 교체 및 관리업무 특별조사 요청의 접수, 동의자료 확인, 관련 조사 및 후속조치 처리",
             "items": _PROVIDED_ITEMS,
             "retention": "",
+            "delivery": "",  # operator confirmation, not shown to residents: how the file is handed over
             "refusal": _RECIPIENT_REFUSAL.format(name="주식회사 케이비아주", kind="회사"),
             "question": "주식회사 케이비아주에 위 개인정보를 제공하는 것에 동의하십니까?",
             **_YES_NO,
@@ -296,6 +299,7 @@ SEED_CONTENT: dict = {
             "purpose": "본인이 동의한 요청사항에 관한 사실확인·행정감독 요청의 접수, 동의자료 확인 및 민원 처리",
             "items": _PROVIDED_ITEMS,
             "retention": "",
+            "delivery": "",
             "refusal": _RECIPIENT_REFUSAL.format(name="서울특별시 강동구", kind="기관"),
             "question": "서울특별시 강동구에 위 개인정보를 제공하는 것에 동의하십니까?",
             **_YES_NO,
@@ -333,6 +337,7 @@ REQUIRED_SETTINGS = (
     (("privacy", "contact"), "문의·열람·정정·철회 요청 연락처 (전화번호 또는 이메일)"),
     (("privacy", "retention_records"), "동의자료 보유·이용기간 (또는 명확한 종료 기준)"),
     (("privacy", "storage_location"), "개인정보 저장 위치·국외 이전 안내 (서버 소재지 등)"),
+    (("privacy", "destruction_plan"), "보유기간 종료 후 파기 대상·실행 방법·백업 처리 (운영 확인, 주민 화면 미표시)"),
 )
 
 
@@ -349,13 +354,26 @@ def _line(value: object) -> str:
 
 
 def rich_blocks(text: str) -> list[list[list[tuple[str, bool]]]]:
-    """paragraphs -> lines -> (text, bold) runs, for the templates and the PDF."""
+    """paragraphs -> lines -> (text, bold) runs, for the templates and the PDF.
+
+    A ** opened on one line stays open over the next lines of the same paragraph (publishing is blocked while a
+    paragraph has an odd number of **, so nothing stays bold past its paragraph in published wording).
+    """
     blocks = []
     for paragraph in re.split(r"\n\s*\n", text or ""):
         lines = [line for line in paragraph.split("\n") if line.strip()]
         if not lines:
             continue
-        blocks.append([[(part, i % 2 == 1) for i, part in enumerate(line.split("**")) if part] for line in lines])
+        bold, out = False, []
+        for line in lines:
+            runs = []
+            for i, part in enumerate(line.split("**")):
+                if i:
+                    bold = not bold
+                if part:
+                    runs.append((part, bold))
+            out.append(runs)
+        blocks.append(out)
     return blocks
 
 
@@ -452,8 +470,9 @@ _TOP_TEXT_KEYS = {
     "intro", "questions_intro", "participant_target", "participation_notes", "provision_intro", "principles",
     "final_statements",
 }
-_PRIVACY_TEXT_KEYS = {"purpose", "retention_notes", "refusal", "storage_location", "items_input", "items_generated"}
-_RECIPIENT_TEXT_KEYS = {"purpose", "items", "refusal", "retention"}
+_PRIVACY_TEXT_KEYS = {"purpose", "retention_notes", "refusal", "storage_location", "items_input", "items_generated",
+                      "destruction_plan"}
+_RECIPIENT_TEXT_KEYS = {"purpose", "items", "refusal", "retention", "delivery"}
 
 
 def seed_content() -> dict:
@@ -461,8 +480,17 @@ def seed_content() -> dict:
 
 
 def content_hash(content: Mapping) -> str:
-    canonical = json.dumps(normalize_content(content), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    """SHA-256 of the content exactly as given (callers pass normalised content; a published version is hashed
+    as stored, so a later change of the wording schema never changes the result for old versions)."""
+    canonical = json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def version_hash_ok(version: ConsentVersion) -> bool:
+    """Does the stored wording still match the stored hash (checked with the version's own hash scheme)?"""
+    if version.hash_scheme == HASH_SCHEME:
+        return content_hash(version.content) == version.content_hash
+    return False  # an unknown scheme is never reported as verified
 
 
 def active_questions(content: Mapping) -> list[dict]:
@@ -516,6 +544,8 @@ def publish_blockers(content: Mapping) -> list[str]:
     for recipient in content["recipients"]:
         if not recipient["retention"].strip():
             problems.append(f"미입력: {recipient['name'] or recipient['key']}의 보유·이용기간 (또는 보존기준)")
+        if not recipient["delivery"].strip():
+            problems.append(f"미입력: {recipient['name'] or recipient['key']}에 대한 제출 방식 (운영 확인, 주민 화면 미표시)")
         for name, label in (("name", "제공받는 자"), ("purpose", "이용 목적"), ("items", "제공 항목"),
                             ("refusal", "거부 시 영향"), ("question", "선택 질문")):
             if not recipient[name].strip():
@@ -549,12 +579,16 @@ def publish_blockers(content: Mapping) -> list[str]:
 
 
 # ------------------------------------------------------------------------------ admin editor form parsing
-def content_from_form(form: Mapping[str, str], base: Mapping, reserved: Collection[str] = ()) -> dict:
+def content_from_form(form: Mapping[str, str], base: Mapping, reserved: Collection[str] = (),
+                      published: Mapping | None = None) -> dict:
     """Build a draft from the admin editor's fields. Keys of questions/recipients come from `base` only.
 
     `reserved`: question keys the agenda ever used (every published version); a new question never gets one.
+    `published`: the current version; a question split off ("새 질문으로 분리") leaves its old key with the
+    wording published under it, not the edited one.
     """
     base = normalize_content(base)
+    published_questions = {q["key"]: q for q in normalize_content(published)["questions"]} if published else {}
     value = lambda name: form.get(name, "")  # noqa: E731
 
     sections = []
@@ -575,18 +609,21 @@ def content_from_form(form: Mapping[str, str], base: Mapping, reserved: Collecti
     known = {q["key"]: q for q in base["questions"]}
     taken = set(known) | set(reserved)
     next_number = 1 + max([int(k[1:]) for k in taken if k[1:].isdigit()] or [0])
-    questions = []
+    questions, added = [], 0
     for index in range(QUESTIONS_MAX + 1):
         prefix = f"q{index}_"
         if f"{prefix}title" not in form:
             continue
         key = value(f"{prefix}key").strip()
         title, text = value(f"{prefix}title"), value(f"{prefix}text")
-        if key not in known:
-            if not (title.strip() or text.strip()) or len(known) + len(questions) >= QUESTIONS_MAX:
+        # "새 질문으로 분리": the edited wording gets a new key; the old key stays (inactive, old answers intact).
+        split = key in known and bool(value(f"{prefix}split"))
+        if key not in known or split:
+            if not (title.strip() or text.strip()) or len(known) + added >= QUESTIONS_MAX:
                 continue
             key = f"q{next_number}"
             next_number += 1
+            added += 1
         order = value(f"{prefix}order").strip()
         questions.append((
             int(order) if order.lstrip("-").isdigit() else index + 1,
@@ -604,7 +641,7 @@ def content_from_form(form: Mapping[str, str], base: Mapping, reserved: Collecti
     kept = {q[2]["key"] for q in questions}
     missing = [q for q in base["questions"] if q["key"] not in kept]  # never drop a key: keep it, inactive
     for question in missing:
-        questions.append((10_000, 0, {**question, "active": False}))
+        questions.append((10_000, 0, {**published_questions.get(question["key"], question), "active": False}))
 
     recipients = []
     for recipient in base["recipients"]:
@@ -707,7 +744,25 @@ class PublishError(Exception):
     pass
 
 
-def publish(db: Session, agenda: Agenda, ip: str | None) -> ConsentVersion:
+_WORDING_FIELDS = ("title", "text", "agree_label", "disagree_label")
+
+
+def reworded_questions(previous: Mapping | None, content: Mapping) -> list[str]:
+    """Questions that keep their key (so their answers are counted together) but read differently than in the
+    published version. Publishing them needs the admin's explicit "same meaning" confirmation; otherwise the
+    editor's "새 질문으로 분리" gives the new wording a new key."""
+    if not previous:
+        return []
+    before = {q["key"]: q for q in previous.get("questions", []) if q.get("active")}
+    changed = []
+    for number, question in enumerate(active_questions(content), start=1):
+        old = before.get(question["key"])
+        if old is not None and any(old.get(name) != question.get(name) for name in _WORDING_FIELDS):
+            changed.append(f"질문 {number}. {question['title']}")
+    return changed
+
+
+def publish(db: Session, agenda: Agenda, ip: str | None, *, merge_reworded: bool = False) -> ConsentVersion:
     """Copy the draft into a new immutable version (the agenda's current version from now on)."""
     locked = db.scalar(select(Agenda).where(Agenda.id == agenda.id).with_for_update())
     draft = draft_of(db, locked)
@@ -721,6 +776,12 @@ def publish(db: Session, agenda: Agenda, ip: str | None) -> ConsentVersion:
     current = current_version(db, locked)
     if current is not None and current.content_hash == digest:
         raise PublishError("현재 게시 버전과 달라진 점이 없습니다.")
+    reworded = reworded_questions(current.content if current else None, content)
+    if reworded and not merge_reworded:
+        raise PublishError(
+            "게시 버전과 문구가 달라진 질문이 있습니다: " + ", ".join(reworded) + ". 뜻이 같다면(오탈자·표현 수정) "
+            "'이전 답변과 합산' 확인란을 체크하고, 뜻이 달라졌다면 편집 화면에서 '새 질문으로 분리'를 선택해 주세요."
+        )
     number = (current.version_no if current else 0) + 1
     version = ConsentVersion(
         agenda_id=locked.id,
@@ -854,6 +915,10 @@ class ConsentInput:
 _TOKEN = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
 
 
+def valid_token(token: str | None) -> bool:
+    return bool(token) and bool(_TOKEN.match(token))
+
+
 def validate_consent(form: Mapping[str, str], content: Mapping) -> ConsentInput:
     """Server-side check of a resident's consent form against the version they were shown."""
     errors: dict[str, str] = {}
@@ -969,9 +1034,15 @@ class ConsentStats:
     none_agree: int = 0  # valid records that agreed to no question: counted as nobody's agreer
 
 
-def question_catalog(db: Session, agenda: Agenda) -> list[QuestionCount]:
+def question_catalog(db: Session, agenda: Agenda, version: ConsentVersion | None = None) -> list[QuestionCount]:
     """Every question key ever published for the agenda: current questions in their current order and
-    numbering, then keys that only older versions asked (their answers stay countable)."""
+    numbering, then keys that only older versions asked (their answers stay countable).
+
+    With `version`: exactly that version's questions, numbered and worded as in that version.
+    """
+    if version is not None:
+        return [QuestionCount(q["key"], f"질문 {n}. {q['title']}", True)
+                for n, q in enumerate(active_questions(version.content), start=1)]
     versions = db.scalars(
         select(ConsentVersion).where(ConsentVersion.agenda_id == agenda.id).order_by(ConsentVersion.version_no.desc())
     ).all()
@@ -984,26 +1055,30 @@ def question_catalog(db: Session, agenda: Agenda) -> list[QuestionCount]:
     return list(catalog.values())  # the current version's order first, then keys only older versions asked
 
 
-def recipient_catalog(db: Session, agenda: Agenda) -> list[RecipientCount]:
-    version = current_version(db, agenda)
+def recipient_catalog(db: Session, agenda: Agenda, version: ConsentVersion | None = None) -> list[RecipientCount]:
+    version = version or current_version(db, agenda)
     content = version.content if version else (draft_of(db, agenda).content if draft_of(db, agenda) else SEED_CONTENT)
     return [RecipientCount(r["key"], r["name"], r["short_name"] or r["name"]) for r in content["recipients"]]
 
 
-def consent_stats(db: Session, agenda: Agenda) -> ConsentStats:
+def consent_stats(db: Session, agenda: Agenda, version: ConsentVersion | None = None) -> ConsentStats:
+    """Counts of the agenda, or of one version only (its records, its questions as worded then)."""
+    scope = [ConsentSubmission.agenda_id == agenda.id]
+    if version is not None:
+        scope.append(ConsentSubmission.version_id == version.id)
     by_status = dict(
         db.execute(
             select(ConsentSubmission.status, func.count())
-            .where(ConsentSubmission.agenda_id == agenda.id)
+            .where(*scope)
             .group_by(ConsentSubmission.status)
         ).all()
     )
-    questions = question_catalog(db, agenda)
+    questions = question_catalog(db, agenda, version)
     index = {q.key: q for q in questions}
     for key, answer, count in db.execute(
         select(ConsentAnswer.question_key, ConsentAnswer.answer, func.count())
         .join(ConsentSubmission, ConsentSubmission.id == ConsentAnswer.submission_id)
-        .where(ConsentSubmission.agenda_id == agenda.id, ConsentSubmission.status == STATUS_ACTIVE)
+        .where(*scope, ConsentSubmission.status == STATUS_ACTIVE)
         .group_by(ConsentAnswer.question_key, ConsentAnswer.answer)
     ).all():
         entry = index.get(key)
@@ -1015,7 +1090,7 @@ def consent_stats(db: Session, agenda: Agenda) -> ConsentStats:
         else:
             entry.disagree = count
 
-    recipients = recipient_catalog(db, agenda)
+    recipients = recipient_catalog(db, agenda, version)
     by_key = {r.key: r for r in recipients}
     for key, agreed, withdrawn, count in db.execute(
         select(
@@ -1025,7 +1100,7 @@ def consent_stats(db: Session, agenda: Agenda) -> ConsentStats:
             func.count(),
         )
         .join(ConsentSubmission, ConsentSubmission.id == ConsentProvision.submission_id)
-        .where(ConsentSubmission.agenda_id == agenda.id, ConsentSubmission.status == STATUS_ACTIVE)
+        .where(*scope, ConsentSubmission.status == STATUS_ACTIVE)
         .group_by(ConsentProvision.recipient_key, ConsentProvision.agreed, ConsentProvision.withdrawn_at.is_not(None))
     ).all():
         entry = by_key.get(key)
@@ -1042,7 +1117,7 @@ def consent_stats(db: Session, agenda: Agenda) -> ConsentStats:
         .join(ConsentSubmission, ConsentSubmission.id == ConsentProvision.submission_id)
         .join(ConsentAnswer, ConsentAnswer.submission_id == ConsentSubmission.id)
         .where(
-            ConsentSubmission.agenda_id == agenda.id,
+            *scope,
             ConsentSubmission.status == STATUS_ACTIVE,
             ConsentProvision.agreed.is_(True),
             ConsentProvision.withdrawn_at.is_(None),
@@ -1057,7 +1132,7 @@ def consent_stats(db: Session, agenda: Agenda) -> ConsentStats:
         select(ConsentProvision.recipient_key, func.count())
         .join(ConsentSubmission, ConsentSubmission.id == ConsentProvision.submission_id)
         .where(
-            ConsentSubmission.agenda_id == agenda.id,
+            *scope,
             ConsentSubmission.status == STATUS_ACTIVE,
             ConsentProvision.agreed.is_(True),
             ConsentProvision.withdrawn_at.is_(None),
@@ -1072,7 +1147,7 @@ def consent_stats(db: Session, agenda: Agenda) -> ConsentStats:
     for agreed, answered in db.execute(
         select(func.sum(case((ConsentAnswer.answer == OPINION_AGREE, 1), else_=0)), func.count(ConsentAnswer.id))
         .join(ConsentSubmission, ConsentSubmission.id == ConsentAnswer.submission_id)
-        .where(ConsentSubmission.agenda_id == agenda.id, ConsentSubmission.status == STATUS_ACTIVE)
+        .where(*scope, ConsentSubmission.status == STATUS_ACTIVE)
         .group_by(ConsentAnswer.submission_id)
     ).all():
         agreed = int(agreed or 0)

@@ -67,6 +67,16 @@
           data-confirm="저장된 초안을 {{ next_label }}(으)로 게시할까요?{% if is_public %}&#10;&#10;이 안건은 주민 페이지에 공개 중이라 바로 반영됩니다. 작성 중이던 주민은 새로고침 후 다시 확인하게 됩니다.{% else %}&#10;&#10;이 안건은 비공개라 주민 화면은 바뀌지 않습니다.{% endif %}&#10;게시한 버전은 수정·삭제할 수 없습니다.">
       <input type="hidden" name="csrf" value="{{ csrf_token }}">
       <input type="hidden" name="draft_hash" value="{{ draft_hash }}">
+      {% if reworded %}
+      <div class="blockers" role="status">
+        <p class="blockers-title">게시 버전과 문구가 달라진 질문 {{ reworded|length }}개</p>
+        <ul>{% for title in reworded %}<li>{{ title }}</li>{% endfor %}</ul>
+        <p class="panel-help">같은 식별자로 게시하면 이전 답변과 새 답변이 같은 질문으로 합산됩니다. 뜻이 달라졌다면 게시하지 말고
+          위 편집 화면에서 해당 질문의 '새 질문으로 분리'를 체크해 저장하세요.</p>
+        <label class="check-line"><input type="checkbox" name="merge_reworded" value="1" required>
+          위 질문은 뜻이 같습니다(오탈자·표현 수정). 이전 답변과 합산해도 됩니다.</label>
+      </div>
+      {% endif %}
       <button class="btn btn-primary" type="submit"{% if blockers or same_as_version %} disabled{% endif %}>{{ next_label }}(으)로 게시</button>
       <p class="panel-help">게시는 <strong>저장된 초안</strong> 기준입니다. 아래에서 고친 내용은 먼저 '초안 저장'을 누르고 미리보기로 확인하세요.
         {% if same_as_version %}저장된 초안이 게시 버전과 같아 게시할 것이 없습니다.{% endif %}</p>
@@ -132,6 +142,10 @@
           <label class="slot-small"><span>순서</span><input class="input" name="q{{ i }}_order" value="{{ i + 1 }}" inputmode="numeric" maxlength="3"></label>
           <label class="check-line"><input type="checkbox" name="q{{ i }}_active" value="1"{% if q is none or q.active %} checked{% endif %}> 주민 화면에 사용</label>
         </div>
+        {% if q is not none %}
+        <label class="check-line split-line"><input type="checkbox" name="q{{ i }}_split" value="1"> 새 질문으로 분리 — 문구의 뜻이 바뀌어 이전 답변과 따로 집계해야 할 때
+          (이 식별자는 이전 문구로 '사용 안 함'이 되고, 고친 문구는 새 식별자를 받습니다)</label>
+        {% endif %}
         <label class="field-label" for="q{{ i }}-title">질문 제목</label>
         <input class="input" id="q{{ i }}-title" name="q{{ i }}_title" value="{{ q.title if q else '' }}" maxlength="300" autocomplete="off">
         <label class="field-label" for="q{{ i }}-text">질문 내용</label>
@@ -182,6 +196,7 @@
       <input type="hidden" name="privacy_retention_access" value="{{ p.retention_access }}">
       {% endif %}
       {{ area("privacy_retention_notes", "파기 안내", p.retention_notes, rows=4) }}
+      {{ area("privacy_destruction_plan", "운영 확인: 보유기간 종료 후 파기 대상·실행 방법·백업 처리 (주민 화면에 표시되지 않음)", p.destruction_plan, key="privacy/destruction_plan", help="예: 무엇을 언제 지우는지, 누가 어떤 방법으로 지우는지, DB 백업·내려받은 파일은 어떻게 처리하는지", rows=4) }}
       {{ area("privacy_storage_location", "개인정보 저장 위치", p.storage_location, key="privacy/storage_location", help="서버 소재지와 국외 저장·이전 여부 및 필요한 안내", rows=3) }}
       {{ area("privacy_refusal", "동의 거부권 및 거부 시 영향", p.refusal, rows=4) }}
       {{ input("privacy_question", "선택 질문", p.question) }}
@@ -210,6 +225,11 @@
           <label class="field-label" for="f-r{{ i }}_retention">④ 제공받는 자의 보유·이용기간 <span class="req-badge">{% if not r.retention %}게시 전 입력 필요{% else %}운영 설정값{% endif %}</span></label>
           <p class="field-help">{{ r.short_name or r.name }}에 확인한 보유기간 또는 보존기준</p>
           <textarea class="input doc-textarea" id="f-r{{ i }}_retention" name="r{{ i }}_retention" rows="2">{{ r.retention }}</textarea>
+        </div>
+        <div class="doc-field{% if not r.delivery %} is-missing{% endif %}">
+          <label class="field-label" for="f-r{{ i }}_delivery">운영 확인: 제출 방식 (주민 화면에 표시되지 않음) <span class="req-badge">{% if not r.delivery %}게시 전 입력 필요{% else %}운영 설정값{% endif %}</span></label>
+          <p class="field-help">{{ r.short_name or r.name }}에 자료를 어떤 방법으로 전달하는지 (예: 출력본 직접 전달, 전자우편 등)</p>
+          <textarea class="input doc-textarea" id="f-r{{ i }}_delivery" name="r{{ i }}_delivery" rows="2">{{ r.delivery }}</textarea>
         </div>
         {{ area("r" ~ i ~ "_refusal", "⑤ 동의 거부권 및 거부 시 영향", r.refusal, rows=4) }}
         {{ input("r" ~ i ~ "_question", "선택 질문", r.question) }}

@@ -210,6 +210,7 @@ code { padding: 0 3px; border-radius: 4px; background: #f1f3f5; font-size: 0.92e
 .publish-form .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .tag-list { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .purge-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.split-line { font-size: 14px; color: #3b4148; }
 .purge-row .input { width: 8em; }
 .purge-row .btn-danger { margin-top: 0; }
 .table-counts td.num { width: 7em; }

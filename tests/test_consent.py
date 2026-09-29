@@ -55,9 +55,11 @@ def ready_content() -> dict:
     content["privacy"].update(
         controller="테스트 운영주체(가상)", officer="가상 책임자", contact="test@example.invalid",
         retention_records="테스트용 보유기간", retention_access="테스트용 30일", storage_location="테스트용 저장 위치",
+        destruction_plan="테스트용 파기 계획",
     )
     for recipient in content["recipients"]:
         recipient["retention"] = f"테스트용 {recipient['short_name']} 보유기간"
+        recipient["delivery"] = f"테스트용 {recipient['short_name']} 제출 방식"
     return content
 
 
@@ -202,7 +204,7 @@ def test_publish_is_blocked_until_the_operator_settings_are_filled(admin, db):
     db.rollback()
     message = str(caught.value)
     for label in ("참여 대상", "수집·관리 주체", "관리책임자", "연락처", "동의자료 보유", "저장 위치", "접속 IP", "케이비아주",
-                  "강동구"):
+                  "강동구", "파기 대상", "제출 방식"):
         assert label in message
     csrf = admin_csrf(admin)
     page = admin.get(f"/admin/consent/{CODE}/edit").text
@@ -240,6 +242,7 @@ def test_hash_covers_every_part_of_the_wording():
     base = ready_content()
     digest = consent.content_hash(base)
     assert digest == consent.content_hash(copy.deepcopy(base))
+    assert digest == consent.content_hash(consent.normalize_content(base))
     changes = [
         lambda c: c["sections"][2].update(body=c["sections"][2]["body"] + " "),
         lambda c: c["sections"][2].update(body=c["sections"][2]["body"] + "추가"),
@@ -255,9 +258,24 @@ def test_hash_covers_every_part_of_the_wording():
     for change in changes:
         content = copy.deepcopy(base)
         change(content)
-        if consent.content_hash(content) != digest:
+        if consent.content_hash(consent.normalize_content(content)) != digest:  # as publish() does
             changed += 1
     assert changed == len(changes) - 1  # trailing spaces are normalised away, everything else counts
+
+
+def test_a_stored_version_verifies_on_its_stored_json_even_after_the_schema_grows(admin, db, monkeypatch):
+    version = publish_ready(db)
+    assert consent.version_hash_ok(version)
+    monkeypatch.setitem(consent.SEED_CONTENT, "later_field", "")  # a field added by some later change
+    assert "later_field" in consent.normalize_content(version.content)
+    db.expire_all()
+    assert consent.version_hash_ok(db.get(ConsentVersion, version.id))
+    assert "저장된 원문과 확인값 일치" in admin.get(f"/admin/consent/{CODE}/versions/{V1}").text
+
+
+def test_bold_opened_on_one_line_continues_on_the_next_line_of_the_paragraph():
+    blocks = consent.rich_blocks("**첫째 줄\n둘째 줄** 보통\n\n다음 문단")
+    assert blocks == [[[("첫째 줄", True)], [("둘째 줄", True), (" 보통", False)]], [[("다음 문단", False)]]]
 
 
 # ---------------------------------------------------------------------------------- resident page and form
@@ -436,11 +454,26 @@ def test_a_form_opened_before_a_new_version_is_not_stored(client, db):
     content["questions"][0]["text"] = "바뀐 질문 1 문구"
     agenda = agenda_of(db)
     consent.save_draft(db, agenda, content, None)
-    consent.publish(db, agenda, None)
+    consent.publish(db, agenda, None, merge_reworded=True)
     response = post_consent(client)  # still carries V1
     assert response.status_code == 409 and response.json()["code"] == "document_changed"
     assert "다시 입력" in response.json()["message"]
     assert rows_of(db) == []
+
+
+def test_a_retry_after_a_lost_answer_gets_its_receipt_even_after_a_new_version(client, db):
+    publish_ready(db)
+    form = consent_form(unit="2203")
+    assert post_consent(client, form).status_code == 201  # stored, but pretend the answer never arrived
+    content = ready_content()
+    content["intro"] = "그사이 게시된 두 번째 버전"
+    agenda = agenda_of(db)
+    consent.save_draft(db, agenda, content, None)
+    consent.publish(db, agenda, None)
+    consent.set_accepting(db, agenda_of(db), False)
+    retry = post_consent(client, form)
+    assert retry.status_code == 201 and rows_of(db)[0].receipt_no in client.get(retry.json()["redirect"]).text
+    assert len(rows_of(db)) == 1
 
 
 def test_a_retried_request_returns_the_first_receipt_without_a_second_record(client, db):
@@ -566,11 +599,15 @@ def test_withdrawing_one_recipient_removes_the_record_from_that_recipient_only(a
     assert admin.get(f"/admin/consent-submissions/{row.public_id}/pdf/company").status_code == 409
 
 
-def test_access_info_can_be_erased_after_its_retention_period(admin, client, db):
+def test_access_info_can_be_erased_after_its_retention_period(admin, db):
     publish_ready(db)
     post_consent(admin, unit="1901")
     post_consent(admin, unit="1902")
     csrf = admin_csrf(admin)
+    refused = admin.post(f"/admin/consent/{CODE}/access-info/purge", data={"csrf": csrf, "days": "0"})
+    assert "1 이상" in refused.text and all(row.ip_address for row in rows_of(db))
+    dashboard = admin.get(f"/admin/consent/{CODE}").text
+    assert "접속 정보가 남아 있는 기록: <strong>2건</strong>" in dashboard and "js/admin.js" in dashboard
     admin.post(f"/admin/consent/{CODE}/access-info/purge", data={"csrf": csrf, "days": "30"})
     assert all(row.ip_address and row.user_agent for row in rows_of(db))  # both are younger than 30 days
     old = rows_of(db)[0]
@@ -760,6 +797,67 @@ def test_a_question_key_is_never_handed_out_twice(admin, db):
     admin.post(f"/admin/consent/{CODE}/draft", data=fields)
     keys = [q["key"] for q in consent.draft_of(db, agenda_of(db)).content["questions"]]
     assert keys == ["q1", "q2", "q3", "q5"]
+
+
+def test_a_reworded_question_is_either_split_or_explicitly_merged(admin, db):
+    publish_ready(db)
+    for unit in ("2301", "2302", "2303"):
+        post_consent(admin, unit=unit, answers=("AGREE", "DISAGREE", "AGREE"))
+    agenda = agenda_of(db)
+    reworded = ready_content()
+    reworded["questions"][0]["title"] = "관리사무소장 업무 개선 권고 요청"
+    reworded["questions"][0]["text"] = "업무 개선 권고에 동의하십니까?"
+    consent.save_draft(db, agenda, reworded, None)
+    page = admin.get(f"/admin/consent/{CODE}/edit").text
+    assert "게시 버전과 문구가 달라진 질문 1개" in page and 'name="merge_reworded"' in page
+    draft_hash = re.search(r'name="draft_hash" value="([^"]+)"', page).group(1)
+    admin.post(f"/admin/consent/{CODE}/publish", data={"csrf": csrf_from(page), "draft_hash": draft_hash})
+    assert db.scalar(select(func.count()).select_from(ConsentVersion)) == 1  # not without a choice
+
+    # Split: the edited wording gets a new key, q1 keeps V1's wording and answers.
+    fields = editor_fields(page)
+    fields["q0_split"] = "1"
+    admin.post(f"/admin/consent/{CODE}/draft", data=fields)
+    draft = consent.draft_of(db, agenda_of(db)).content
+    assert [(q["key"], q["active"], q["title"]) for q in draft["questions"]] == [
+        ("q4", True, "관리사무소장 업무 개선 권고 요청"), ("q2", True, ready_content()["questions"][1]["title"]),
+        ("q3", True, ready_content()["questions"][2]["title"]), ("q1", False, ready_content()["questions"][0]["title"])]
+    page = admin.get(f"/admin/consent/{CODE}/edit").text
+    assert "게시 버전과 문구가 달라진 질문" not in page
+    draft_hash = re.search(r'name="draft_hash" value="([^"]+)"', page).group(1)
+    admin.post(f"/admin/consent/{CODE}/publish", data={"csrf": csrf_from(page), "draft_hash": draft_hash})
+    assert consent.current_version(db, agenda_of(db)).label == V2
+    assert post_consent(admin, unit="2304", version_label=V2, answer_q4="AGREE").status_code == 201
+    stats = {q.key: (q.title, q.agree, q.disagree) for q in consent.consent_stats(db, agenda_of(db)).questions}
+    assert stats["q4"] == ("질문 1. 관리사무소장 업무 개선 권고 요청", 1, 0)
+    assert stats["q1"] == ("관리사무소장 교체 요청 (이전 버전 질문)", 3, 0)  # never merged into the new wording
+    by_version = {q.key: q.agree for q in consent.consent_stats(
+        db, agenda_of(db), consent.version_by_label(db, agenda_of(db), V1)).questions}
+    assert by_version == {"q1": 3, "q2": 0, "q3": 3}
+    filtered = admin.get(f"/admin/consent/{CODE}?version={V1}").text
+    assert f"{V1}만" in filtered and "질문 1. 관리사무소장 교체 요청" in filtered
+
+    # Merge: a typo fix may keep the key, but only with the explicit confirmation.
+    typo = consent.normalize_content(consent.current_version(db, agenda_of(db)).content)
+    typo["questions"][1]["text"] = typo["questions"][1]["text"].replace("요청하는", "요청 하는")
+    consent.save_draft(db, agenda_of(db), typo, None)
+    with pytest.raises(consent.PublishError):
+        consent.publish(db, agenda_of(db), None)
+    db.rollback()
+    assert consent.publish(db, agenda_of(db), None, merge_reworded=True).label == f"{CODE}_V3"
+
+
+def test_the_question_limit_counts_each_question_once(admin, db):
+    content = ready_content()
+    for number in (4, 5):
+        content["questions"].append({"key": f"q{number}", "title": f"가상 질문 {number}", "text": "내용", "active": True,
+                                     "agree_label": "동의합니다", "disagree_label": "동의하지 않습니다"})
+    consent.save_draft(db, agenda_of(db), content, None)
+    fields = editor_fields(admin.get(f"/admin/consent/{CODE}/edit").text)
+    fields.update({"q5_key": "", "q5_title": "여섯째 질문", "q5_text": "여섯째 질문 내용", "q5_active": "1"})
+    admin.post(f"/admin/consent/{CODE}/draft", data=fields)
+    keys = [q["key"] for q in consent.draft_of(db, agenda_of(db)).content["questions"]]
+    assert keys == ["q1", "q2", "q3", "q4", "q5", "q6"]
 
 
 def test_switching_back_to_the_legacy_agenda_keeps_everything(admin, submit, db):

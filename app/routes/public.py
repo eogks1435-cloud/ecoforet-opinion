@@ -231,14 +231,23 @@ def _consent_receipt(submission: ConsentSubmission) -> JSONResponse:
     return _json(201, ok=True, redirect=f"/opinion/complete?r={token}")
 
 
-def _replay(db: Session, data: consent.ConsentInput, version_label: str) -> JSONResponse | None:
-    """A retry of a request that was already stored returns the first result instead of a second record."""
-    if not data.client_token:
+def _stored_for_token(db: Session, token: str) -> ConsentSubmission | None:
+    if not consent.valid_token(token):
         return None
-    earlier = db.scalar(select(ConsentSubmission).where(ConsentSubmission.client_token == data.client_token))
-    if earlier is None:
-        return None
-    if earlier.request_hash == data.request_hash(version_label):
+    return db.scalar(select(ConsentSubmission).where(ConsentSubmission.client_token == token))
+
+
+def _replay(earlier: ConsentSubmission, fields: dict[str, str]) -> JSONResponse:
+    """This page's request was stored already (its answer may have been lost on the way).
+
+    The same request gets the first receipt, whatever happened since (new version, pause, agenda switch);
+    anything else sent with the same page token is refused, so one page never creates two records.
+    """
+    try:
+        data = consent.validate_consent(fields, earlier.version.content)
+    except FormErrors:
+        data = None
+    if data is not None and earlier.request_hash == data.request_hash(earlier.version_label):
         return _consent_receipt(earlier)
     return _json(
         409, ok=False, code="already_submitted",
@@ -256,7 +265,11 @@ def submit_consent(
     received_at = datetime.now(timezone.utc)
     if request.headers.get("x-requested-with") != "fetch" or not same_origin(request):
         return _json(403, ok=False, code="forbidden", message=BAD_REQUEST_MESSAGE)
+    token = (fields.get("client_token") or "").strip()
     try:
+        earlier = _stored_for_token(db, token)
+        if earlier is not None:  # a retry: answered before the agenda, pause and version checks
+            return _replay(earlier, fields)
         agenda = consent.agenda_by_code(db, fields.get("agenda_code", ""))
         if agenda is None or agenda.kind != AGENDA_CONSENT or not agenda.is_public:
             return _json(409, ok=False, code="document_changed", message=AGENDA_CHANGED_MESSAGE)
@@ -278,9 +291,6 @@ def submit_consent(
 
     collect_access = bool(version.content["privacy"].get("collect_access_info"))
     try:
-        replay = _replay(db, data, version.label)
-        if replay is not None:
-            return replay
         if consent.active_submission_exists(db, agenda.id, data.building, data.unit):
             return _json(409, ok=False, code="duplicate", message=CONSENT_DUPLICATE_MESSAGE,
                          errors={"residence": CONSENT_DUPLICATE_MESSAGE})
@@ -312,9 +322,9 @@ def submit_consent(
         # Same unit or same retried request at the same moment: the unique indexes keep only one record.
         db.rollback()
         try:
-            replay = _replay(db, data, version.label)
-            if replay is not None:
-                return replay
+            earlier = _stored_for_token(db, token)
+            if earlier is not None:  # the same request arrived twice at the same moment
+                return _replay(earlier, fields)
             duplicate = consent.active_submission_exists(db, agenda.id, data.building, data.unit)
         except SQLAlchemyError:
             db.rollback()
