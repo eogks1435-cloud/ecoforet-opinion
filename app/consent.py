@@ -974,6 +974,12 @@ def purge_access_info(db: Session, agenda: Agenda, older_than_days: int) -> int:
     return len(rows)
 
 
+def purge_expired_access_info(db: Session, older_than_days: int) -> int:
+    """The automatic run of the access-information retention, for every consent agenda (see purge_access_info)."""
+    agendas = db.scalars(select(Agenda).where(Agenda.kind == AGENDA_CONSENT)).all()
+    return sum(purge_access_info(db, agenda, older_than_days) for agenda in agendas)
+
+
 def withdraw_provision(db: Session, provision: ConsentProvision, reason: str, already_delivered: bool) -> None:
     """The resident withdrew consent to one recipient: the record leaves that recipient's list and files."""
     provision.withdrawn_at = datetime.now(timezone.utc)

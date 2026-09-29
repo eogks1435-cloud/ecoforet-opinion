@@ -206,6 +206,10 @@
       공지한 보유기간이 지나면 이 안건 제출 기록의 접속 IP·브라우저 정보만 지웁니다(동·호수·성명·서명·답변은 그대로).
       지운 정보는 되살릴 수 없고, 이전에 만든 DB 백업·내보내기 파일에는 그 보관기간이 끝날 때까지 남아 있습니다.
     </p>
+    <p class="panel-help">
+      {% if auto_purge_days %}제출 후 {{ auto_purge_days }}일이 지난 기록의 접속 정보는 서버가 자동으로 지웁니다(서버가 켜질 때와 켜져 있는 동안 1시간마다).
+      아래 입력은 그보다 먼저 지울 때 씁니다.{% else %}자동 파기가 꺼져 있습니다. 보유기간이 지나면 아래에서 직접 지워 주세요.{% endif %}
+    </p>
     <p class="current-meta">접속 정보가 남아 있는 기록: <strong>{{ access_rows }}건</strong>{% if access_oldest %} · 가장 이른 제출 {{ access_oldest|kst }}{% endif %}</p>
     <form class="purge-form" method="post" action="/admin/consent/{{ agenda.code }}/access-info/purge"
           data-confirm="입력한 일수보다 오래된 제출 기록의 접속 IP·브라우저 정보를 지울까요? 되돌릴 수 없습니다.">

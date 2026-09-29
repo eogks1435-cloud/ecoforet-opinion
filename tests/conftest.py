@@ -42,6 +42,7 @@ os.environ["DATABASE_URL"] = _test_database_url()
 os.environ["APP_ENV"] = "test"
 os.environ["SECRET_KEY"] = "pytest-only-secret-key-0123456789abcdef"
 os.environ["ADMIN_PASSWORD"] = ADMIN_PASSWORD
+os.environ["ACCESS_INFO_RETENTION_DAYS"] = "0"  # no background purge racing the tests; one test turns it on
 
 from fastapi.testclient import TestClient  # noqa: E402
 from PIL import Image, ImageDraw  # noqa: E402

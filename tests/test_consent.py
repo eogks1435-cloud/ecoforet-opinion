@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import csv
+import dataclasses
 import hashlib
 import html as html_lib
 import io
@@ -14,7 +15,9 @@ import itertools
 import re
 import secrets
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,7 +26,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app import consent
+from app import consent, main
 from app.database import engine, init_db
 from app.document import SEED_TITLE
 from app.main import app
@@ -675,6 +678,31 @@ def test_access_info_can_be_erased_after_its_retention_period(admin, db):
     response = anonymous.post(f"/admin/consent/{CODE}/access-info/purge", data={"days": "0"}, follow_redirects=False)
     assert response.status_code == 303 and response.headers["location"] == "/admin/login"
     assert rows_of(db)[1].ip_address
+
+
+def test_access_info_past_the_stated_period_is_erased_automatically(admin, db, monkeypatch):
+    publish_ready(db)
+    post_consent(admin, unit="1911")
+    post_consent(admin, unit="1912")
+    old = rows_of(db)[0]
+    db.execute(ConsentSubmission.__table__.update().where(ConsentSubmission.id == old.id).values(
+        submitted_at=old.submitted_at - timedelta(days=31)))
+    db.commit()
+    on = dataclasses.replace(main.settings, access_info_retention_days=30)
+    monkeypatch.setattr(main, "settings", on)
+    monkeypatch.setattr("app.routes.admin_consent.settings", on)
+    assert "30일이 지난 기록의 접속 정보는 서버가 자동으로 지웁니다" in admin.get(f"/admin/consent/{CODE}").text
+    with TestClient(app):  # every start runs it (the free instance starts again after sleeping)
+        for _ in range(100):
+            if rows_of(db)[0].ip_address is None:
+                break
+            time.sleep(0.05)
+    first, second = rows_of(db)
+    assert (first.ip_address, first.user_agent) == (None, None)
+    assert first.resident_name == "가상주민" and bytes(first.signature_data) and first.answer_map()  # only that
+    assert second.ip_address and second.user_agent  # 30 days have not passed
+    monkeypatch.setattr(main, "settings", dataclasses.replace(on, access_info_retention_days=0))
+    assert main.purge_expired_access_info() == 0  # 0 turns the automatic purge off
 
 
 # ------------------------------------------------------------------------------------------ access control

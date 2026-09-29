@@ -24,6 +24,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .. import consent, consent_pdf
+from ..config import settings
 from ..database import get_db
 from ..models import (
     AGENDA_CONSENT,
@@ -419,6 +420,7 @@ def consent_dashboard(code: str, request: Request, db: Session = Depends(get_db)
         "stats_version": stats_version,
         "access_rows": int(access_rows or 0),
         "access_oldest": access_oldest,
+        "auto_purge_days": settings.access_info_retention_days,
         "filters": filters,
         "question_options": questions,
         "question_short": _short_names(questions),

@@ -49,6 +49,7 @@ class Settings:
     db_pool_size: int
     db_max_overflow: int
     asset_version: str
+    access_info_retention_days: int  # IP/browser data older than this is erased automatically; 0 = only by hand
 
     @property
     def is_production(self) -> bool:
@@ -87,6 +88,8 @@ def load_settings() -> Settings:
         db_max_overflow=_int_env("DB_MAX_OVERFLOW", 10),
         # Render sets RENDER_GIT_COMMIT; used to bust browser caches of CSS/JS after each deploy.
         asset_version=os.environ.get("RENDER_GIT_COMMIT", "")[:8] or str(int(time.time())),
+        # The published consent form promises 30 days; change both together.
+        access_info_retention_days=_int_env("ACCESS_INFO_RETENTION_DAYS", 30),
     )
 
 
