@@ -410,14 +410,19 @@ def consent_dashboard(code: str, request: Request, db: Session = Depends(get_db)
             (ConsentSubmission.ip_address.is_not(None)) | (ConsentSubmission.user_agent.is_not(None)),
         )
     ).one()
+    stats = consent.consent_stats(db, agenda, stats_version)
+    whole = stats if stats_version is None else consent.consent_stats(db, agenda)  # bundles ignore the filter
     context = {
         "active": "consent",
         "csrf_token": csrf_token(request),
         "flash": request.session.pop(FLASH_KEY, None),
         "agenda": agenda,
         "version": consent.current_version(db, agenda),
-        "stats": consent.consent_stats(db, agenda, stats_version),
+        "stats": stats,
         "stats_version": stats_version,
+        "bundle_size": BUNDLE_SIZE,
+        "bundle_internal": (whole.active, _bundle_parts(whole.active)),
+        "bundle_recipients": [(r, _bundle_parts(r.eligible)) for r in whole.recipients],
         "access_rows": int(access_rows or 0),
         "access_oldest": access_oldest,
         "auto_purge_days": settings.access_info_retention_days,
@@ -525,6 +530,72 @@ def recipient_pdf(code: str, key: str, request: Request, db: Session = Depends(g
         _pdf_slots.release()
     logger.info("recipient pdf agenda=%s recipient=%s rows=%d", agenda.code, key, len(rows))
     return _pdf_response(content, f"consent_{agenda.code}_{key}_{_stamp()}.pdf")
+
+
+BUNDLE_SIZE = 50  # records per bundle file (about 300 pages): quick enough to build on the small instance
+
+
+def _bundle_parts(count: int) -> list[tuple[int, int, int]]:
+    """(part, first number, last number) of each bundle file for `count` records."""
+    return [(n + 1, n * BUNDLE_SIZE + 1, min(count, (n + 1) * BUNDLE_SIZE))
+            for n in range((count + BUNDLE_SIZE - 1) // BUNDLE_SIZE)]
+
+
+def _bundle(agenda: Agenda, rows: list[ConsentSubmission], recipient_key: str | None, copy_title: str, note: str,
+            part: int, duplex: bool) -> Response:
+    if not 1 <= part <= len(_bundle_parts(len(rows))):
+        return Response("해당하는 기록이 없습니다.", status_code=404, media_type="text/plain; charset=utf-8")
+    first = (part - 1) * BUNDLE_SIZE
+    chosen = rows[first:first + BUNDLE_SIZE]
+    content = consent_pdf.build_consent_bundle_pdf(
+        chosen, recipient_key, title=agenda.name, copy_title=copy_title, first_number=first + 1, total=len(rows),
+        note=note, duplex=duplex,
+    )
+    logger.info("consent bundle pdf agenda=%s recipient=%s part=%d rows=%d duplex=%s",
+                agenda.code, recipient_key or "-", part, len(chosen), duplex)
+    name = f"{first + 1:03d}-{first + len(chosen):03d}" + ("_duplex" if duplex else "")
+    return _pdf_response(content, f"consent_{agenda.code}_{recipient_key or 'internal'}_records_{name}.pdf")
+
+
+@router.get("/consent/{code}/records.pdf")
+def records_bundle(code: str, request: Request, part: int = 1, duplex: str = "", db: Session = Depends(get_db)):
+    """Internal copies of every valid record, oldest first, BUNDLE_SIZE per file (for printing them all)."""
+    if not is_admin(request):
+        return to_login()
+    if not _pdf_slots.acquire(timeout=20):
+        return _busy()
+    try:
+        agenda = _consent_agenda(db, code)
+        if agenda is None:
+            return Response(status_code=404)
+        rows = consent.valid_submissions(db, agenda)
+        return _bundle(agenda, rows, None, "내부 열람용",
+                       "유효한 제출 전체의 내부 열람용 개별 동의서입니다(제출 순서). 접속 IP·브라우저 정보는 넣지 않습니다.",
+                       part, duplex == "1")
+    finally:
+        _pdf_slots.release()
+
+
+@router.get("/consent/{code}/recipients/{key}/records.pdf")
+def recipient_records_bundle(code: str, key: str, request: Request, part: int = 1, duplex: str = "",
+                             db: Session = Depends(get_db)):
+    """One recipient's copies of every record in its list (same people and numbers as the list PDF)."""
+    if not is_admin(request):
+        return to_login()
+    if not _pdf_slots.acquire(timeout=20):
+        return _busy()
+    try:
+        agenda = _consent_agenda(db, code)
+        recipient = _recipient(db, agenda, key) if agenda else None
+        if recipient is None:
+            return Response(status_code=404)
+        rows = consent.eligible_submissions(db, agenda, key)
+        return _bundle(agenda, rows, key, f"{recipient.name} 제출용",
+                       f"유효한 제출 중 {recipient.name}에 대한 개인정보 제공에 동의하고 1개 이상의 요청사항에 동의한 참여자의 "
+                       "개별 동의서입니다. 번호는 명단 PDF의 번호와 같고, 각 동의서에는 이 제출처에 대한 제공 부분만 들어 있습니다.",
+                       part, duplex == "1")
+    finally:
+        _pdf_slots.release()
 
 
 @router.post("/consent/{code}/access-info/purge")

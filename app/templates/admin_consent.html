@@ -91,6 +91,34 @@
     <p class="stats-note">제출 파일(명단 PDF·CSV)에는 제공에 동의하고 1개 이상의 요청에 동의한 유효 기록만 들어가며, 각 사람의 질문별 실제 답변을 그대로 표시합니다. 접속 IP·브라우저 정보와 다른 제출처에 대한 선택은 넣지 않습니다.</p>
   </section>
 
+  <section class="panel" aria-labelledby="bundle-title">
+    <h2 class="panel-title" id="bundle-title">개별 동의서 일괄 인쇄 (PDF)</h2>
+    <p class="panel-help">
+      한 사람의 동의서 전체(서명 포함)를 한 부씩 모두 묶은 PDF입니다. 사람마다 새 쪽에서 시작하고, 파일 하나에 {{ bundle_size }}명씩 나눕니다(1명당 약 6쪽).
+      양면으로 인쇄할 때는 <strong>양면용</strong>을 여세요. 두 사람의 쪽이 한 종이에 섞이지 않도록 빈 면이 들어갑니다.
+    </p>
+    <ul class="bundle-list">
+      {%- set count, parts = bundle_internal %}
+      <li><span class="bundle-name">내부 열람용 <small>유효 {{ count }}건</small></span>
+        <span class="bundle-links">
+        {%- for part, first, last in parts %}
+          <a class="btn btn-secondary btn-row" href="/admin/consent/{{ agenda.code }}/records.pdf?part={{ part }}" target="_blank" rel="noopener">{{ first }}~{{ last }}번</a>
+          <a class="btn btn-ghost btn-row" href="/admin/consent/{{ agenda.code }}/records.pdf?part={{ part }}&amp;duplex=1" target="_blank" rel="noopener">{{ first }}~{{ last }}번 양면용</a>
+        {%- else %}<span class="empty-note">아직 없음</span>{%- endfor %}
+        </span></li>
+      {%- for r, parts in bundle_recipients %}
+      <li><span class="bundle-name">{{ r.short_name }} 제출용 <small>{{ r.eligible }}명</small></span>
+        <span class="bundle-links">
+        {%- for part, first, last in parts %}
+          <a class="btn btn-secondary btn-row" href="/admin/consent/{{ agenda.code }}/recipients/{{ r.key }}/records.pdf?part={{ part }}" target="_blank" rel="noopener">{{ first }}~{{ last }}번</a>
+          <a class="btn btn-ghost btn-row" href="/admin/consent/{{ agenda.code }}/recipients/{{ r.key }}/records.pdf?part={{ part }}&amp;duplex=1" target="_blank" rel="noopener">{{ first }}~{{ last }}번 양면용</a>
+        {%- else %}<span class="empty-note">아직 없음</span>{%- endfor %}
+        </span></li>
+      {%- endfor %}
+    </ul>
+    <p class="stats-note">제출처용 묶음에는 그 제출처 명단 PDF와 같은 사람이 같은 번호로 들어가고, 각 동의서에는 그 제출처에 대한 제공 부분만 나옵니다.</p>
+  </section>
+
   <form class="filters" method="get" action="/admin/consent/{{ agenda.code }}">
     <label class="filter"><span>동</span><input class="input" name="building" value="{{ filters.building }}" inputmode="numeric" maxlength="10" autocomplete="off"></label>
     <label class="filter"><span>호수</span><input class="input" name="unit" value="{{ filters.unit }}" inputmode="numeric" maxlength="10" autocomplete="off"></label>

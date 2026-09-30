@@ -1294,6 +1294,15 @@ def _agreed_to_something():
     return exists().where(ConsentAnswer.submission_id == ConsentSubmission.id, ConsentAnswer.answer == OPINION_AGREE)
 
 
+def valid_submissions(db: Session, agenda: Agenda) -> list[ConsentSubmission]:
+    """The agenda's valid records, oldest first."""
+    return db.scalars(
+        select(ConsentSubmission)
+        .where(ConsentSubmission.agenda_id == agenda.id, ConsentSubmission.status == STATUS_ACTIVE)
+        .order_by(ConsentSubmission.submitted_at.asc(), ConsentSubmission.id.asc())
+    ).all()
+
+
 def eligible_submissions(db: Session, agenda: Agenda, recipient_key: str) -> list[ConsentSubmission]:
     """The records that may go into this recipient's files, oldest first (see eligible_for)."""
     rows = db.scalars(

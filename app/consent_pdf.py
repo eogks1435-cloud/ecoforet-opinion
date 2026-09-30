@@ -4,6 +4,8 @@
   answer, the privacy and provision consents, 동·호수·성명·서명, receipt, time (KST), version, hash, status.
 - build_consent_pdf(row, recipient_key=...): the same record for one recipient - only that recipient's
   provision part, no status internals.
+- build_consent_bundle_pdf(rows, ...): many records' copies in one file for printing (a cover listing them, each
+  record from a new page, optionally from a new sheet for double-sided printing).
 - build_recipient_list_pdf(...): one recipient's list of named agreers (valid records that agreed to this
   recipient and to at least one request), each person's actual answer per question, then the wording.
 - build_blank_form_pdf(...): a paper form with a published version's wording, empty tick boxes and blank
@@ -36,15 +38,26 @@ RED = (180, 35, 24)
 
 
 class _PagedPDF(FPDF):
-    """FPDF with a small footer on every page: what the copy is, and page n of N (for printed stacks)."""
+    """FPDF with a small footer on every page: what the copy is, and page n of N (for printed stacks).
+
+    In a bundle of several records the footer also counts the pages of the record the page belongs to.
+    """
 
     footer_text = ""
+    record_first_page: int | None = None  # set in bundles only
 
     def footer(self) -> None:
         self.set_y(-11)
         self.set_font(FONT, "", 7.6)
         self.set_text_color(*GREY)
-        self.cell(0, 5, f"{self.footer_text}   {self.page_no()} / {{nb}}", align="C")
+        if self.record_first_page is None:
+            text = f"{self.footer_text}   {self.page_no()} / {{nb}}"
+        elif self.footer_text:
+            text = (f"{self.footer_text}   이 동의서 {self.page_no() - self.record_first_page + 1}쪽"
+                    f" · 전체 {self.page_no()} / {{nb}}")
+        else:  # a bundle's cover, or the empty back of a sheet
+            text = f"전체 {self.page_no()} / {{nb}}"
+        self.cell(0, 5, text, align="C")
         self.set_text_color(0, 0, 0)
 
 
@@ -368,13 +381,30 @@ def _wording_only(doc: _Doc, content: Mapping) -> None:
 
 
 # ----------------------------------------------------------------------------------------- one record
+def _copy_of(content: Mapping, recipient_key: str | None) -> tuple[list[dict], str]:
+    """The recipients a copy shows (all, or the one it is for) and the copy's name."""
+    recipients = [r for r in content["recipients"] if recipient_key in (None, r["key"])]
+    name = "내부 열람용" if recipient_key is None else f"{recipients[0]['short_name'] or recipients[0]['name']} 제출용"
+    return recipients, name
+
+
+def _record_footer(row: ConsentSubmission, recipient_key: str | None) -> str:
+    return f"제출번호 {row.receipt_no} · {row.version_label} · {_copy_of(row.version.content, recipient_key)[1]}"
+
+
 def build_consent_pdf(row: ConsentSubmission, recipient_key: str | None = None) -> bytes:
     content = row.version.content  # the stored wording of the version this resident signed
-    answers, provisions = row.answer_map(), row.provision_map()
-    recipients = [r for r in content["recipients"] if recipient_key in (None, r["key"])]
-    copy_name = "내부 열람용" if recipient_key is None else f"{recipients[0]['short_name'] or recipients[0]['name']} 제출용"
     doc = _Doc(f"{content['title']} {content.get('subtitle', '')} - 제출번호 {row.receipt_no}",
-               footer=f"제출번호 {row.receipt_no} · {row.version_label} · {copy_name}")
+               footer=_record_footer(row, recipient_key))
+    _write_record(doc, row, recipient_key)
+    doc.missing_glyph_note()
+    return doc.output()
+
+
+def _write_record(doc: _Doc, row: ConsentSubmission, recipient_key: str | None) -> None:
+    content = row.version.content
+    answers, provisions = row.answer_map(), row.provision_map()
+    recipients, _name = _copy_of(content, recipient_key)
 
     if recipient_key is None and row.status != STATUS_ACTIVE:
         note = f"{consent.STATUS_LABEL[row.status]} 처리된 제출입니다 ({format_kst(row.status_changed_at, '%Y-%m-%d %H:%M')})"
@@ -473,6 +503,58 @@ def build_consent_pdf(row: ConsentSubmission, recipient_key: str | None = None) 
         doc.label_value(label, value, label_w=26)
     doc.line("온라인 동의서 제출 기록에서 출력한 문서입니다. 동·호수·성명·서명만으로 본인인증을 거친 것은 아닙니다.",
              size=8.4, color=GREY, height=4.8)
+
+
+# ------------------------------------------------------------------------------ many records in one file
+def build_consent_bundle_pdf(rows: list[ConsentSubmission], recipient_key: str | None, *, title: str,
+                             copy_title: str, first_number: int, total: int, note: str,
+                             duplex: bool = False) -> bytes:
+    """Several records' copies in one file for printing: a cover listing them, then each record from a new page.
+
+    With `duplex` an empty back side follows a record that ends on a front side, so that no printed sheet
+    carries two people's pages.
+    """
+    last_number = first_number + len(rows) - 1
+    doc = _Doc(f"{title} - {copy_title} 개별 동의서 {first_number}~{last_number}번")
+    pdf = doc.pdf
+    pdf.record_first_page = 1  # the cover's footer shows only the page count
+    printed = format_kst(datetime.now(timezone.utc), "%Y-%m-%d %H:%M")
+
+    content = rows[0].version.content if rows else {}
+    if content.get("apartment_name"):
+        doc.line(content["apartment_name"], size=10.5, align="C", color=GREY, height=6)
+    doc.line(title, size=15, bold=True, align="C", height=8)
+    doc.line(f"{copy_title} 개별 동의서 묶음", size=12.5, bold=True, align="C", height=7.4)
+    doc.gap(2)
+    doc.label_value("이 파일", f"{first_number}~{last_number}번 ({len(rows)}명, 전체 {total}명 중)", label_w=36)
+    doc.label_value("출력일시", f"{printed} (한국시간)", label_w=36)
+    doc.label_value("인쇄", "양면 인쇄용: 사람마다 새 종이에서 시작합니다(빈 면이 들어 있습니다)." if duplex else
+                    "사람마다 새 쪽에서 시작합니다. 양면으로 인쇄할 때는 양면용 파일을 쓰세요.", label_w=36)
+    doc.line(note, size=9, color=GREY, height=5)
+    doc.gap(3)
+    widths = [16, 34, 44, 30, 50]
+    widths = [w * doc.width / sum(widths) for w in widths]
+    pdf.set_draw_color(150, 150, 150)
+    pdf.set_font(FONT, "B", 9.4)
+    pdf.set_fill_color(240, 242, 245)
+    for width, label in zip(widths, ("번호", "동·호수", "성명", "제출번호", "제출일시")):
+        pdf.cell(width, 8, label, border=1, align="C", fill=True)
+    pdf.ln(8)
+    for number, row in enumerate(rows, start=first_number):
+        doc.room(8)
+        for width, value in zip(widths, (str(number), f"{row.building}동 {row.unit}호", row.resident_name,
+                                         row.receipt_no, format_kst(row.submitted_at, "%Y-%m-%d %H:%M"))):
+            doc.fit_cell(width, 8, value)
+        pdf.ln(8)
+
+    for row in rows:
+        if duplex and pdf.page_no() % 2 == 1:
+            pdf.add_page()  # the empty back of the previous sheet
+            pdf.footer_text = ""
+        pdf.add_page()
+        pdf.footer_text = doc.text(_record_footer(row, recipient_key))
+        pdf.record_first_page = pdf.page_no()
+        _write_record(doc, row, recipient_key)
     doc.missing_glyph_note()
     return doc.output()
 

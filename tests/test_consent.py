@@ -705,6 +705,38 @@ def test_access_info_past_the_stated_period_is_erased_automatically(admin, db, m
     assert main.purge_expired_access_info() == 0  # 0 turns the automatic purge off
 
 
+def test_every_record_can_be_printed_in_one_go(admin, db, monkeypatch):
+    """'개별 동의서 일괄 인쇄': internal and per-recipient bundles, each record from a new page (sheet if duplex)."""
+    publish_ready(db)
+    for unit, company in (("2001", "AGREE"), ("2002", "DISAGREE"), ("2003", "AGREE")):
+        assert post_consent(admin, unit=unit, company=company).status_code == 201
+    receipts = {row.unit: row.receipt_no for row in rows_of(db)}
+    page = admin.get(f"/admin/consent/{CODE}").text
+    assert f"/admin/consent/{CODE}/records.pdf?part=1" in page and "1~3번" in page
+    assert f"/admin/consent/{CODE}/recipients/company/records.pdf?part=1" in page and "1~2번" in page
+
+    internal = PdfReader(io.BytesIO(admin.get(f"/admin/consent/{CODE}/records.pdf").content))
+    texts = [p.extract_text() or "" for p in internal.pages]
+    starts = [i for i, text in enumerate(texts) if "이 동의서 1쪽" in text]
+    assert [receipts[u] in texts[i] for i, u in zip(starts, ("2001", "2002", "2003"))] == [True, True, True]
+    assert "내부 열람용 개별 동의서 묶음" in texts[0] and "1~3번 (3명, 전체 3명 중)" in texts[0]
+
+    company = pdf_text(admin.get(f"/admin/consent/{CODE}/recipients/company/records.pdf").content)
+    assert receipts["2001"] in company and receipts["2003"] in company and receipts["2002"] not in company
+    assert "케이비아주 제출용" in company and "서울특별시 강동구에 위 개인정보를" not in company  # its own part only
+
+    duplex = PdfReader(io.BytesIO(admin.get(f"/admin/consent/{CODE}/records.pdf?part=1&duplex=1").content))
+    starts = [i for i, p in enumerate(duplex.pages) if "이 동의서 1쪽" in (p.extract_text() or "")]
+    assert len(starts) == 3 and all(i % 2 == 0 for i in starts)  # every record starts on the front of a sheet
+
+    monkeypatch.setattr("app.routes.admin_consent.BUNDLE_SIZE", 2)
+    second = pdf_text(admin.get(f"/admin/consent/{CODE}/records.pdf?part=2").content)
+    assert receipts["2003"] in second and receipts["2001"] not in second and "3~3번 (1명, 전체 3명 중)" in second
+    assert admin.get(f"/admin/consent/{CODE}/records.pdf?part=3").status_code == 404
+    anonymous = TestClient(app).get(f"/admin/consent/{CODE}/records.pdf", follow_redirects=False)
+    assert anonymous.status_code == 303 and anonymous.headers["location"] == "/admin/login"
+
+
 # ------------------------------------------------------------------------------------------ access control
 def test_nothing_personal_or_unpublished_is_reachable_without_login(client, db):
     publish_ready(db)
